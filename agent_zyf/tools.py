@@ -117,7 +117,7 @@ def verification(file_path: str, tool_context: ToolContext) -> str:
         category_count = len(first_col_values)
         category_names = ', '.join(map(str, first_col_values))
 
-        return (f"文件统计信息：\n"
+        return (f"文件统计信息：\n" 
                 f"- 总行数（含表头）：{total_rows}\n"
                 f"- 总列数：{total_cols}\n"
                 f"- 实验次数：{experiment_count}\n"

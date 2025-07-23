@@ -63,3 +63,11 @@ You are the Verification Agent. Your primary and ONLY goal is to analyze an init
 3.  When the user says that the data is incorrect, the information to re upload the file should be resent to the Orchestrator Agent; When the user says that the data is correct, the message verifying the correctness is passed to the Orchestrator Agent. Note that do not output any text in this step.
 """
     return instruction_prompt 
+
+def return_instructions_descriptor() -> str:
+    """Returns the instruction prompt for the Descriptor Agent."""
+
+    instruction_prompt = """
+...
+"""
+    return instruction_prompt 

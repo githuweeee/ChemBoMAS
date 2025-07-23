@@ -20,8 +20,17 @@ from google.adk.agents import LlmAgent
 # Import sub-agents
 
 # Import orchestrator-specific components
-from .prompts import return_instructions_orchestrator,return_instructions_verification
+from .prompts import return_instructions_orchestrator,return_instructions_verification, return_instructions_descriptor
 from . import tools
+
+descriptor_agent = LlmAgent(
+    name = "verification_agent",
+    model = "gemini-2.5-flash",
+    instruction = return_instructions_descriptor(),
+    description="verify data",
+    tools = [tools.descriptor_generate],
+    output_key="generate descriptor"
+)
 
 verification_agent = LlmAgent(
     name = "verification_agent",
