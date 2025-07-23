@@ -24,7 +24,7 @@ from .prompts import return_instructions_orchestrator,return_instructions_verifi
 from . import tools
 
 descriptor_agent = LlmAgent(
-    name = "verification_agent",
+    name = "verification_agent", 
     model = "gemini-2.5-flash",
     instruction = return_instructions_descriptor(),
     description="verify data",
