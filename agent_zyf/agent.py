@@ -28,7 +28,7 @@ descriptor_agent = LlmAgent(
     model = "gemini-2.5-flash",
     instruction = return_instructions_descriptor(),
     description="verify data",
-    tools = [tools.descriptor_generate],
+    tools = [tools.generate_descriptor],
     output_key="generate descriptor"
 )
 

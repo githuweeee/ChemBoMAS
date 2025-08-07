@@ -126,168 +126,89 @@ def verification(file_path: str, tool_context: ToolContext) -> str:
     except Exception as e:
         return f"File processing error：{e}"
 
-import logging
-from pathlib import Path
+
+
+import pandas as pd
 import numpy as np
-from mordred import Calculator, descriptors
 from rdkit import Chem
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.feature_selection import RFECV
+from mordred import Calculator, descriptors
+from concurrent.futures import ProcessPoolExecutor
+import warnings
+import multiprocessing
+warnings.filterwarnings('ignore')
 
-# Keywords to identify target columns, which will be excluded from feature generation.
-TARGET_KEYWORDS = ["target", "yield", "output", "ee", "cost"]
-# Keyword to identify SMILES columns for molecular descriptor generation.
-SMILES_KEYWORD = "smiles"
-# Minimum number of experiments required to trigger RFECV.
-RFECV_THRESHOLD = 10
+def calculate_descriptors(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    calc = Calculator(descriptors, ignore_3D=False)  # 不忽略3D描述符
+    descriptor_values = calc(mol)
+    descriptors_dict = {}
+    for key, value in descriptor_values.items():
+        if value is not None:
+            float_value = float(value)
+            if not np.isnan(float_value) and not np.isinf(float_value):
+                descriptors_dict[str(key)] = float_value
+    return descriptors_dict
 
-def _encode_smiles(df: pd.DataFrame, smiles_cols: list[str]) -> pd.DataFrame:
-    """Generates molecular descriptors from SMILES columns using mordred."""
-    logging.info(f"Generating molecular descriptors for columns: {smiles_cols}")
-    calc = Calculator(descriptors, ignore_3D=True)
-    all_descriptors = []
+def calculate_descriptors_parallel(smiles_list):
+    n_jobs = max(1,multiprocessing.cpu_count()-1)
+    valid_smiles = [s for s in smiles_list if isinstance(s, str) and s.strip()]
+    invalid_num = len(smiles_list) - len(valid_smiles)
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        results = list(executor.map(calculate_descriptors, valid_smiles))
+    return results, invalid_num
 
-    for col in smiles_cols:
-        mols = [Chem.MolFromSmiles(smi) for smi in df[col]]
-        # Calculate descriptors, returning a pandas DataFrame
-        descriptor_df = calc.pandas(mols, quiet=True)
-        # Add prefix to column names to avoid collisions
-        descriptor_df = descriptor_df.add_prefix(f"{col}_")
-        all_descriptors.append(descriptor_df)
+def generate_descriptor(file_path: str, tool_context: ToolContext) -> str:
+    state = tool_context.state
+    session_id = state.get("session_id")
+    if not os.path.exists(file_path):
+        return f"Error: The file '{file_path}' does not exist."
+    
+    df = pd.read_csv(file_path,encodings='utf-8')
 
-    # Concatenate all descriptor dataframes
-    if not all_descriptors:
-        return pd.DataFrame()
+    if df.shape[1] <= 5:
+            return "Error: CSV file has less than 6 columns, unable to find the target column。"
+    
+    target_col_index = df.shape[0] - 1
+    target_col_name = df.columns[target_col_index]
+    #print(f"目标列被确定为: 第{target_col_index + 1}列 '{target_col_name}'")
 
-    final_df = pd.concat(all_descriptors, axis=1)
-    # Convert all descriptor columns to numeric, coercing errors to NaN
-    final_df = final_df.apply(pd.to_numeric, errors="coerce")
-    # Impute NaN values with the column mean
-    final_df.fillna(final_df.mean(), inplace=True)
+    df[target_col_name] = pd.to_numeric(df[target_col_name], errors='coerce')
+    original_rows = len(df)
+    df.dropna(subset=[target_col_name], inplace=True)
+    filtered_rows = len(df)
+    delete_rows = original_rows - filtered_rows
+    df.reset_index(drop=True, inplace=True)
 
-    logging.info(f"Generated {len(final_df.columns)} molecular descriptors.")
-    return final_df
-
-
-def _encode_categorical(
-    df: pd.DataFrame, categorical_cols: list[str]
-) -> pd.DataFrame:
-    """Applies one-hot encoding to categorical columns."""
-    if not categorical_cols:
-        return pd.DataFrame()
-    logging.info(f"Applying one-hot encoding to: {categorical_cols}")
-    return pd.get_dummies(df[categorical_cols], prefix=categorical_cols)
-
-
-def _select_features_rfecv(
-    features: pd.DataFrame, target: pd.DataFrame
-) -> (pd.DataFrame, str):
-    """Performs Recursive Feature Elimination with Cross-Validation."""
-    logging.info("Starting RFECV for feature selection...")
-    estimator = RandomForestRegressor(n_estimators=50, random_state=42)
-    # Use the first target column for feature selection if multiple targets exist
-    selector = RFECV(
-        estimator=estimator,
-        step=1,
-        cv=3,  # 3-fold cross-validation
-        scoring="neg_mean_squared_error",
-        n_jobs=-1,  # Use all available CPU cores
-    )
-    selector.fit(features, target.iloc[:, 0])
-
-    selected_features = features.loc[:, selector.support_]
-    num_initial = features.shape[1]
-    num_selected = selected_features.shape[1]
-    summary = (
-        "Recursive Feature Elimination (RFECV) complete. "
-        f"Selected {num_selected} features out of {num_initial}."
-    )
-    logging.info(summary)
-    return selected_features, summary
-
-
-def descriptor_generate(file_path: str, tool_context: ToolContext) -> str:
+    smiles_col_index = 2#第三列是固化剂SMILES
+    smiles_col_name = df.columns[smiles_col_index]
+    unique_curing_smiles = df[smiles_col_name].astype(str).str.strip().dropna().unique()
     try:
-        # 1. Load data and context from session state
-        verified_path_str = file_path
-        if not verified_path_str:
-            raise ValueError("Session State is missing 'verified_data_path'.")
-        df = pd.read_csv(verified_path_str)
-        exp_count = tool_context.state.get("experiment_count", len(df))
+        curing_descriptors_list, invalid_num = calculate_descriptors_parallel(unique_curing_smiles)
+    except:
+        return "Failed to generate descriptor"
+    curing_desc_map = {smile: desc for smile, desc in zip(unique_curing_smiles, curing_descriptors_list) if desc is not None}
+    features_df = pd.DataFrame()
+    loading_ratio_col_index = 3#第四列是固化剂添加比例
+    loading_ratio_col_name = df.columns[loading_ratio_col_index]
+    features_df['固化剂添加比例'] = pd.to_numeric(df[loading_ratio_col_name].astype(str).str.strip(), errors='coerce')
+    all_descriptor_keys = set()
+    for desc_dict in curing_desc_map.values():
+        if desc_dict:
+            all_descriptor_keys.update(desc_dict.keys())
+    for key in all_descriptor_keys:
+        features_df[f'Curing_{key}'] = np.nan
+    for i, row in df.iterrows():
+        curing_smile = str(row[smiles_col_name]).strip()
+        if curing_smile in curing_desc_map and curing_desc_map[curing_smile]:
+            for key, value in curing_desc_map[curing_smile].items():
+                features_df.loc[i, f'Curing_{key}'] = value
+    features_df = features_df.dropna(axis=1, how='all')
+    features_df = features_df.fillna(features_df.median())
 
-        # 2. Identify column types
-        target_cols = [
-            c for c in df.columns if any(k in c.lower() for k in TARGET_KEYWORDS)
-        ]
-        smiles_cols = [
-            c for c in df.columns if SMILES_KEYWORD in c.lower()
-        ]
-        numerical_cols = df.select_dtypes(include=np.number).columns.tolist()
-        # Exclude target columns from numerical features
-        numerical_cols = [c for c in numerical_cols if c not in target_cols]
+    output_file = 'features_matrix.csv'
+    features_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+    targets_df = df[[target_col_name]]
+    target_variables_file = 'target_variables.csv'
+    targets_df.to_csv('target_variables.csv', index=False, encoding='utf-8-sig')
 
-        # Categorical columns are non-numeric, non-SMILES, and non-target
-        categorical_cols = [
-            c for c in df.columns
-            if c not in smiles_cols + numerical_cols + target_cols
-        ]
-        
-        summary = [
-            "Descriptor generation process started.",
-            f"- Identified {len(target_cols)} target column(s): {target_cols}",
-            f"- Identified {len(smiles_cols)} SMILES column(s): {smiles_cols}",
-            f"- Identified {len(categorical_cols)} categorical column(s): {categorical_cols}",
-            f"- Identified {len(numerical_cols)} numerical column(s): {numerical_cols}",
-        ]
-
-        # 3. Feature Engineering
-        smiles_features = _encode_smiles(df, smiles_cols)
-        categorical_features = _encode_categorical(df, categorical_cols)
-        numerical_features = df[numerical_cols]
-        
-        # Keep targets separate
-        targets = df[target_cols]
-
-        # Combine all features
-        all_features = pd.concat(
-            [numerical_features, categorical_features, smiles_features], axis=1
-        )
-        summary.append(f"-> Generated a total of {all_features.shape[1]} features.")
-
-        # 4. Conditional Feature Selection
-        rfecv_summary = ""
-        if exp_count >= RFECV_THRESHOLD:
-            final_features, rfecv_summary = _select_features_rfecv(
-                all_features, targets
-            )
-            summary.append(f"- {rfecv_summary}")
-        else:
-            final_features = all_features
-            summary.append(
-                f"- Skipping feature selection (RFECV) as experiment count ({exp_count}) is below threshold ({RFECV_THRESHOLD})."
-            )
-
-        # 5. Save results and update state
-        final_df_to_save = pd.concat([final_features, targets], axis=1)
-
-        session_id = tool_context.state.get("session_id", "unknown_session")
-        verified_path = Path(verified_path_str)
-        descriptors_dir = verified_path.parent
-        
-        descriptors_filename = f"descriptors_{session_id}.csv"
-        descriptors_path = descriptors_dir / descriptors_filename
-        
-        final_df_to_save.to_csv(descriptors_path, index=False)
-        logging.info(f"Final descriptors saved to: {descriptors_path}")
-
-        tool_context.state["descriptors_path"] = str(descriptors_path)
-        tool_context.state["status"] = "Descriptors_Generated"
-        
-        summary.append(f"\n✅ Success! Descriptors file created at '{descriptors_path}'.")
-        summary.append("Proceeding to the next step: Recommender Agent.")
-
-        return "\n".join(summary)
-
-    except Exception as e:
-        logging.error(f"Error in descriptor generation: {e}", exc_info=True)
-        return f"An error occurred during descriptor generation: {e}" 
+    return f"Descriptor generated successfully. The target column has been determined as: {target_col_index+1} column '{target_col_name}'. Saved to {output_file} and target variables to {target_variables_file}"
