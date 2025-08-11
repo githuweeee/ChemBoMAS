@@ -36,8 +36,7 @@ You operate based on the `status` field in the Session State. This is your prima
 3.  **`status: 'Descriptors_Generated'`**:
     -   This means a file has been uploaded and is ready for descriptors generating.
     -   You  MUST Call the `descriptor_agent` agent to perform feature engineering.
-    -   When the `descriptor_agent` agent output obtained, if the output says that descriptor generating has finished, then process to the next status(Congratulation). If the output says that descriptor generating has errors, then output the error message and ask the user to reupload the file(jump to Initial State).
-    -   After the 'descriptor_agent' output that descriptors generating has finished, process to the next status(Congratulation).
+    -   When the `descriptor_agent` agent output obtained, if the output says that the feature selection has done, process to the next status(Congratulation). Otherwise, print the error message and ask the user to reupload the file(jump to Initial State).
 
 4.  **`status: 'Congratulation'`**:  
     -   This means you have done the whole work
@@ -79,7 +78,8 @@ You are the Descriptor Optimization Agent. Your sole responsibility is to take t
 
 # Workflow
 1.  You will be invoked by the Orchestrator Agent after the user has confirmed the initial data verification.You will receive the relative path of the experimental file from the Orchestrator Agent.
-2.  Your ONLY available tool is `generate_descriptor`. You MUST call this tool. Take the path of the experimental file and tool_comtext (The context for the current tool execution.) as inputs, use the 'generate_descriptor' tool to generate the descriptors.
-3.  Pass the output of the tool to the Orchestrator Agent.
+2.  Your ONLY two available tools are `generate_descriptor` and `feature_selection`. You MUST call `generate_descriptor` first. Take the path of the experimental file and tool_comtext (The context for the current tool execution.) as inputs, use the 'generate_descriptor' tool to generate the descriptors.
+3.  Pass the output of the `generate_descriptor` tool to the `feature_selection` tool. Take the path of the feature matrix csv file and the path of the target variables csv file to `feature_selection` tool.
+4.  Pass the output of the `feature_selection` tool to the Orchestrator Agent.
 """
     return instruction_prompt 

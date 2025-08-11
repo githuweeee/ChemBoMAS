@@ -212,3 +212,136 @@ def generate_descriptor(file_path: str, tool_context: ToolContext) -> str:
     targets_df.to_csv('target_variables.csv', index=False, encoding='utf-8-sig')
 
     return f"Descriptor generated successfully. The target column has been determined as: {target_col_index+1} column '{target_col_name}'. Saved to {output_file} and target variables to {target_variables_file}"
+
+
+from sklearn.feature_selection import RFECV
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import re
+
+def clean_filename(filename):
+    """清理文件名，替换特殊字符为下划线，确保文件名一致性"""
+    filename = str(filename)
+    # 先清理可能存在的制表符、回车符和换行符
+    filename = filename.strip()
+    # 替换所有非法字符为下划线
+    invalid_chars = r'[\\/*?:"<>|\ \t\n\r]'
+    return re.sub(invalid_chars, '_', filename)
+
+def perform_feature_selection(X, y, target_name):
+    """对单个目标变量进行特征选择"""
+    try:
+        X_valid = X.copy()
+        y_valid = y.copy()
+        if y_valid.isna().any():
+            return "target_name has missing values"
+        if len(y_valid) < 10:
+            return "the number of samples is too small"
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_valid)
+        # 创建RFECV对象
+        selector = RFECV(
+            estimator=RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42, n_jobs=-1),
+            step=5,  # 每次移除5个特征
+            min_features_to_select=20,  # 至少保留20个特征
+            cv=5,  # 5折交叉验证
+            scoring='r2',
+            n_jobs=-1,
+            verbose=2
+        )
+        selector.fit(X_scaled, y_valid)
+        selected_features = X.columns[selector.support_]
+        X_selected = X[selected_features]
+        
+        # 绘制交叉验证得分曲线
+        plt.figure(figsize=(10, 6))
+        plt.xlabel("特征数量")
+        plt.ylabel("交叉验证得分 (R²)")
+        plt.title(f"{target_name} - RFECV性能曲线")
+        
+        # 兼容不同版本的scikit-learn
+        if hasattr(selector, 'cv_results_') and 'mean_test_score' in selector.cv_results_:
+            # 新版本scikit-learn
+            cv_scores = selector.cv_results_['mean_test_score']
+            # 确保x和y长度相等
+            x_range = np.arange(len(cv_scores)) * 5 + min(20, len(X.columns))
+            plt.plot(x_range, cv_scores)
+        elif hasattr(selector, 'grid_scores_'):
+            # 旧版本scikit-learn
+            cv_scores = selector.grid_scores_
+            # 确保x和y长度相等
+            x_range = np.arange(len(cv_scores)) * 5 + min(20, len(X.columns))
+            plt.plot(x_range, cv_scores)
+        else:
+            cv_scores = None
+        
+        # 保存图表
+        clean_target = clean_filename(target_name)
+        plt.tight_layout()
+        plt.savefig(f'rfecv_curve_{clean_target}.png', dpi=300)
+        plt.close()
+        
+        # 获取特征重要性
+        # 使用选中的特征重新训练随机森林来获取特征重要性
+        forest = RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42, n_jobs=-1)
+        forest.fit(X_selected, y_valid)
+        importances = forest.feature_importances_
+
+        # 将特征和重要性配对
+        feature_importances = [(feature, importance) 
+                              for feature, importance in zip(selected_features, importances)]
+        # 按重要性降序排序
+        feature_importances.sort(key=lambda x: x[1], reverse=True)
+        # 创建结果字典
+        result_dict = {
+            'target_name': target_name,
+            'n_features': selector.n_features_,
+            'r2_score': selector.score(X_scaled, y_valid),
+            'selected_features': selected_features.tolist(),
+            'feature_importances': feature_importances,
+            'feature_ranking': selector.ranking_.tolist()
+        }
+        # 添加交叉验证结果
+        if cv_scores is not None:
+            result_dict['cv_scores'] = cv_scores.tolist()
+            result_dict['cv_features'] = x_range.tolist()
+        return result_dict
+    except Exception as e:
+        return "feature selection error"
+
+def feature_selectoin(features_matrix_path: str, target_variables_path: str, tool_context: ToolContext) -> str:
+    features_matrix = pd.read_csv(features_matrix_path, encoding='utf-8-sig')
+    target_variables = pd.read_csv(target_variables_path, encoding='utf-8-sig')
+    selection_results = {}
+    for col in target_variables.columns:
+        clean_target_name = clean_filename(col)
+        y = target_variables[col]
+        result = perform_feature_selection(features_matrix, y, col)
+        if isinstance(result,str):
+            return result
+        
+        selection_results[col] = result
+        selected_features_df = features_matrix[result['selected_features']]
+        selected_features_df.to_csv(f'selected_features_{clean_target_name}.csv', encoding='utf-8-sig')
+        target_df = pd.DataFrame(y)
+        target_df.to_csv(f'target_{clean_target_name}.csv', encoding='utf-8-sig')
+        importance_df = pd.DataFrame(result['feature_importances'], 
+                                          columns=['feature', 'importance'])
+        importance_df.to_csv(f'feature_importance_{clean_target_name}.csv', encoding='utf-8-sig')
+        if 'cv_scores' in result and 'cv_features' in result:
+            cv_results_df = pd.DataFrame({
+                'n_features': result['cv_features'],
+                'cv_score': result['cv_scores']
+            })
+            cv_results_df.to_csv(f'cv_results_{clean_target_name}.csv', encoding='utf-8-sig')    
+    summary_data = {}
+    for target_name, result in selection_results.items():
+        summary_data[target_name] = {
+            '选择的特征数量': result['n_features'],
+            'R²得分': result['r2_score']
+        }                        
+    summary_df = pd.DataFrame(summary_data).T
+    summary_df.to_csv('feature_selection_summary.csv', encoding='utf-8-sig')
+    return f"feature selection done. Successfully process {len(selection_results)} target variables. The results are saved to each csv files."
+    
