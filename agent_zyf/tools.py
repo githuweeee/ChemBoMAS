@@ -110,19 +110,20 @@ def verification(file_path: str, tool_context: ToolContext) -> str:
         total_rows = df.shape[0] + 1  # 包含表头
         total_cols = df.shape[1]
         experiment_count = total_rows - 1
+        cols =  df.columns
+        substance_cols = [c for c in cols if 'Substance' in str(c) and 'name' in str(c)]
+        substance_count = len(substance_cols)
+        target_cols = [c for c in cols if str(c).startswith('Target_')]
+        target_count = len(target_cols)
 
-        # 第一列（除去表头）的种类数和名称
-        first_col_name = df.columns[0]
-        first_col_values = df[first_col_name].dropna().unique()
-        category_count = len(first_col_values)
-        category_names = ', '.join(map(str, first_col_values))
-
-        return (f"文件统计信息：\n" 
-                f"- 总行数（含表头）：{total_rows}\n"
-                f"- 总列数：{total_cols}\n"
-                f"- 实验次数：{experiment_count}\n"
-                f"- 第一列“{first_col_name}”的种类数：{category_count}\n"
-                f"- 种类名称：{category_names}")
+        if (substance_count==0 or target_count==0):
+            return ("Error: Please modify the name of the independent variable or dependent variable according to the format.")
+        return (f"File information: \n"
+                f"- Total number of experiments: {experiment_count}\n"
+                f"- Total number of substances: {substance_count}\n"
+                f"- Name of substances: {substance_cols}\n"
+                f"- Total number of targets: {target_count}\n"
+                f"- Name of targets: {target_cols}")
     except Exception as e:
         return f"File processing error：{e}"
 

@@ -47,7 +47,7 @@ root_agent = LlmAgent(
     model= "gemini-2.5-flash",
     name="orchestrator_agent",
     instruction=return_instructions_orchestrator(),
-    sub_agents=[verification_agent],
+    sub_agents=[verification_agent,descriptor_agent],
     tools=[
         #verification_agent,
         #descriptor_optimization_agent,
