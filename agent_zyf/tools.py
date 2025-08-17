@@ -136,10 +136,13 @@ from mordred import Calculator, descriptors
 from concurrent.futures import ProcessPoolExecutor
 import warnings
 import multiprocessing
+import re
 warnings.filterwarnings('ignore')
 
 def calculate_descriptors(smiles):
     mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
     calc = Calculator(descriptors, ignore_3D=False)  # 不忽略3D描述符
     descriptor_values = calc(mol)
     descriptors_dict = {}
@@ -154,81 +157,146 @@ def calculate_descriptors_parallel(smiles_list):
     n_jobs = max(1,multiprocessing.cpu_count()-1)
     valid_smiles = [s for s in smiles_list if isinstance(s, str) and s.strip()]
     invalid_num = len(smiles_list) - len(valid_smiles)
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(executor.map(calculate_descriptors, valid_smiles))
-    return results, invalid_num
+    if not valid_smiles:
+        return [], len(smiles_list)
+    try:
+        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+            results = list(executor.map(calculate_descriptors, valid_smiles))
+        return results, invalid_num
+    except Exception as e:
+        return [], len(smiles_list)
+
+def clean_filename(filename):
+    filename = str(filename)
+    filename = filename.strip()
+    invalid_chars = r'[\\/*?:"<>|\ \t\n\r]'
+    return re.sub(invalid_chars, '_', filename)
 
 def generate_descriptor(file_path: str, tool_context: ToolContext) -> str:
     state = tool_context.state
     session_id = state.get("session_id")
     if not os.path.exists(file_path):
         return f"Error: The file '{file_path}' does not exist."
-    
-    df = pd.read_csv(file_path,encodings='utf-8')
-
-    if df.shape[1] <= 5:
-            return "Error: CSV file has less than 6 columns, unable to find the target column。"
-    
-    target_col_index = df.shape[0] - 1
-    target_col_name = df.columns[target_col_index]
-    #print(f"目标列被确定为: 第{target_col_index + 1}列 '{target_col_name}'")
-
-    df[target_col_name] = pd.to_numeric(df[target_col_name], errors='coerce')
-    original_rows = len(df)
-    df.dropna(subset=[target_col_name], inplace=True)
-    filtered_rows = len(df)
-    delete_rows = original_rows - filtered_rows
-    df.reset_index(drop=True, inplace=True)
-
-    smiles_col_index = 2#第三列是固化剂SMILES
-    smiles_col_name = df.columns[smiles_col_index]
-    unique_curing_smiles = df[smiles_col_name].astype(str).str.strip().dropna().unique()
     try:
-        curing_descriptors_list, invalid_num = calculate_descriptors_parallel(unique_curing_smiles)
-    except:
-        return "Failed to generate descriptor"
-    curing_desc_map = {smile: desc for smile, desc in zip(unique_curing_smiles, curing_descriptors_list) if desc is not None}
-    features_df = pd.DataFrame()
-    loading_ratio_col_index = 3#第四列是固化剂添加比例
-    loading_ratio_col_name = df.columns[loading_ratio_col_index]
-    features_df['固化剂添加比例'] = pd.to_numeric(df[loading_ratio_col_name].astype(str).str.strip(), errors='coerce')
-    all_descriptor_keys = set()
-    for desc_dict in curing_desc_map.values():
-        if desc_dict:
-            all_descriptor_keys.update(desc_dict.keys())
-    for key in all_descriptor_keys:
-        features_df[f'Curing_{key}'] = np.nan
-    for i, row in df.iterrows():
-        curing_smile = str(row[smiles_col_name]).strip()
-        if curing_smile in curing_desc_map and curing_desc_map[curing_smile]:
-            for key, value in curing_desc_map[curing_smile].items():
-                features_df.loc[i, f'Curing_{key}'] = value
-    features_df = features_df.dropna(axis=1, how='all')
-    features_df = features_df.fillna(features_df.median())
+        df = pd.read_csv(file_path, encoding='utf-8')
+        columns = df.columns.tolist()
+        substance_groups = []
+        target_columns = []
+        i = 1
+        while i < len(columns):
+            col_name = columns[i]
+            if 'Substance' in col_name and 'name' in col_name:
+                substance_name = col_name.split('_')[0]  
+                if i + 2 < len(columns):
+                    smile_col = columns[i + 1]
+                    ratio_col = columns[i + 2]
+                    if 'SMILE' in smile_col and 'ratio' in ratio_col:
+                        substance_groups.append({
+                            'name': substance_name,
+                            'name_col': col_name,
+                            'smile_col': smile_col,
+                            'ratio_col': ratio_col,
+                            'start_index': i
+                        })
+                        i += 4 
+                        continue
+            if col_name.startswith('Target_'):
+                target_columns.append(col_name)
+            i += 1
+        if not substance_groups:
+            return "Error: No valid substance column group found"
+        if not target_columns:
+            return "Error: Target variable column not found"
 
-    output_file = 'features_matrix.csv'
-    features_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    targets_df = df[[target_col_name]]
-    target_variables_file = 'target_variables.csv'
-    targets_df.to_csv('target_variables.csv', index=False, encoding='utf-8-sig')
+        all_features = []
+        substance_info = {}
+        for group in substance_groups:
+            substance_name = group['name']
+            smiles_data = df[group['smile_col']].astype(str).str.strip()
+            ratio_data = pd.to_numeric(df[group['ratio_col']].astype(str).str.strip(), errors='coerce')
+            valid_mask = (smiles_data != 'nan') & (smiles_data != '') & (smiles_data.notna())
+            valid_smiles = smiles_data[valid_mask].unique()
+            if len(valid_smiles) == 0:
+                continue
+            try:
+                descriptors_list, invalid_count = calculate_descriptors_parallel(valid_smiles)
+                valid_smiles_list = list(valid_smiles)
+                desc_map = {}
+                for smile, desc in zip(valid_smiles_list, descriptors_list):
+                    if desc is not None:
+                        desc_map[smile] = desc
+                if not desc_map:
+                    continue
+                features_df = pd.DataFrame()
+                features_df[f'{substance_name}_ratio'] = ratio_data
+                
+                # 添加描述符列
+                all_desc_keys = set()
+                for desc_dict in desc_map.values():
+                    if desc_dict:
+                        all_desc_keys.update(desc_dict.keys())
+                
+                for key in all_desc_keys:
+                    features_df[f'{substance_name}_{key}'] = np.nan
+                
+                # 填充描述符值
+                for idx, row in df.iterrows():
+                    smile = str(row[group['smile_col']]).strip()
+                    if smile in desc_map and desc_map[smile]:
+                        for key, value in desc_map[smile].items():
+                            features_df.loc[idx, f'{substance_name}_{key}'] = value
+                
+                # 清理和填充缺失值
+                features_df = features_df.dropna(axis=1, how='all')
+                features_df = features_df.fillna(features_df.median())
+                
+                # 保存该物质的特征矩阵
+                clean_name = clean_filename(substance_name)
+                substance_file = f'features_{clean_name}.csv'
+                features_df.to_csv(substance_file, index=False, encoding='utf-8-sig')
+                
+                # 记录物质信息
+                substance_info[substance_name] = {
+                    'features_file': substance_file,
+                    'n_features': features_df.shape[1],
+                    'n_samples': features_df.shape[0],
+                    'n_descriptors': len(all_desc_keys)
+                }
+                all_features.append(features_df)
+            except Exception as e:
+                continue
+        if not all_features:
+            return "Error: No feature matrix was generated successfully"
+        
+        # 保存目标变量
+        targets_df = df[target_columns]
+        targets_df.to_csv('target_variables.csv', index=False, encoding='utf-8-sig')
+        
+        # 生成处理报告
+        report = f"""
+Descriptor generation completed!
 
-    return f"Descriptor generated successfully. The target column has been determined as: {target_col_index+1} column '{target_col_name}'. Saved to {output_file} and target variables to {target_variables_file}"
+Summary of processing results:
+- Successfully processed {len(substance_groups)} substance groups
+- Generate {len(target_columns)} target variables
+
+Generated files:
+- features_matrix_combined.csv: The complete feature matrix after merging
+- target_variables.csv: Target variable data
+"""
+        
+        for substance_name, info in substance_info.items():
+            report += f"- {info['features_file']}: {substance_name} Feature Matrix ({info['n_features']} features)\n"
+        report += f"\nTarget variable: {', '.join(target_columns)}"
+        return report
+    except Exception as e:
+        return f"Error: An error occurred while processing the file: {str(e)}"
 
 
 from sklearn.feature_selection import RFECV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
-import re
-
-def clean_filename(filename):
-    """清理文件名，替换特殊字符为下划线，确保文件名一致性"""
-    filename = str(filename)
-    # 先清理可能存在的制表符、回车符和换行符
-    filename = filename.strip()
-    # 替换所有非法字符为下划线
-    invalid_chars = r'[\\/*?:"<>|\ \t\n\r]'
-    return re.sub(invalid_chars, '_', filename)
 
 def perform_feature_selection(X, y, target_name):
     """对单个目标变量进行特征选择"""
@@ -311,7 +379,7 @@ def perform_feature_selection(X, y, target_name):
     except Exception as e:
         return "feature selection error"
 
-def feature_selectoin(features_matrix_path: str, target_variables_path: str, tool_context: ToolContext) -> str:
+def feature_selection(features_matrix_path: str, target_variables_path: str, tool_context: ToolContext) -> str:
     features_matrix = pd.read_csv(features_matrix_path, encoding='utf-8-sig')
     target_variables = pd.read_csv(target_variables_path, encoding='utf-8-sig')
     selection_results = {}
