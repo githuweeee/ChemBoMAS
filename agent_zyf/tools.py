@@ -208,12 +208,18 @@ def generate_descriptor(file_path: str, tool_context: ToolContext) -> str:
         if not target_columns:
             return "Error: Target variable column not found"
 
+        # 首先收集所有物质的ratio数据
+        all_ratio_data = {}
+        for group in substance_groups:
+            substance_name = group['name']
+            ratio_data = pd.to_numeric(df[group['ratio_col']].astype(str).str.strip(), errors='coerce')
+            all_ratio_data[substance_name] = ratio_data
+
         all_features = []
         substance_info = {}
         for group in substance_groups:
             substance_name = group['name']
             smiles_data = df[group['smile_col']].astype(str).str.strip()
-            ratio_data = pd.to_numeric(df[group['ratio_col']].astype(str).str.strip(), errors='coerce')
             valid_mask = (smiles_data != 'nan') & (smiles_data != '') & (smiles_data.notna())
             valid_smiles = smiles_data[valid_mask].unique()
             if len(valid_smiles) == 0:
@@ -228,7 +234,10 @@ def generate_descriptor(file_path: str, tool_context: ToolContext) -> str:
                 if not desc_map:
                     continue
                 features_df = pd.DataFrame()
-                features_df[f'{substance_name}_ratio'] = ratio_data
+                
+                # 首先添加所有物质的ratio列到前面
+                for ratio_substance_name, ratio_data in all_ratio_data.items():
+                    features_df[f'{ratio_substance_name}_ratio'] = ratio_data
                 
                 # 添加描述符列
                 all_desc_keys = set()
@@ -280,9 +289,6 @@ Summary of processing results:
 - Successfully processed {len(substance_groups)} substance groups
 - Generate {len(target_columns)} target variables
 
-Generated files:
-- features_matrix_combined.csv: The complete feature matrix after merging
-- target_variables.csv: Target variable data
 """
         
         for substance_name, info in substance_info.items():
@@ -296,74 +302,66 @@ Generated files:
 from sklearn.feature_selection import RFECV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
+import glob
 
-def perform_feature_selection(X, y, target_name):
+def perform_feature_selection(X, y, target_name, substance_name):
     """对单个目标变量进行特征选择"""
     try:
+        # 使用均值填充缺失值
         X_valid = X.copy()
         y_valid = y.copy()
+        
         if y_valid.isna().any():
-            return "target_name has missing values"
-        if len(y_valid) < 10:
-            return "the number of samples is too small"
+            y_valid = y_valid.fillna(y_valid.mean())
+            
+        #if len(y_valid) < 10:
+        #    print(f"警告: {target_name} 的样本数量不足 ({len(y_valid)} < 10)")
+        #    return None
+
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_valid)
+        
+        # 自适应交叉验证折数，确保每个测试折至少2个样本
+        n_samples = len(y_valid)
+        n_splits = min(5, max(2, n_samples // 2))
+        cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+
         # 创建RFECV对象
         selector = RFECV(
             estimator=RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42, n_jobs=-1),
             step=5,  # 每次移除5个特征
             min_features_to_select=20,  # 至少保留20个特征
-            cv=5,  # 5折交叉验证
+            cv=cv,
             scoring='r2',
             n_jobs=-1,
             verbose=2
         )
+        
         selector.fit(X_scaled, y_valid)
+        
+        # 获取RFECV结果
+        #print(f"最优特征数量: {selector.n_features_}")
+        #print(f"特征选择的R²得分: {selector.score(X_scaled, y_valid):.4f}")
+        
         selected_features = X.columns[selector.support_]
         X_selected = X[selected_features]
         
-        # 绘制交叉验证得分曲线
-        plt.figure(figsize=(10, 6))
-        plt.xlabel("特征数量")
-        plt.ylabel("交叉验证得分 (R²)")
-        plt.title(f"{target_name} - RFECV性能曲线")
-        
-        # 兼容不同版本的scikit-learn
-        if hasattr(selector, 'cv_results_') and 'mean_test_score' in selector.cv_results_:
-            # 新版本scikit-learn
-            cv_scores = selector.cv_results_['mean_test_score']
-            # 确保x和y长度相等
-            x_range = np.arange(len(cv_scores)) * 5 + min(20, len(X.columns))
-            plt.plot(x_range, cv_scores)
-        elif hasattr(selector, 'grid_scores_'):
-            # 旧版本scikit-learn
-            cv_scores = selector.grid_scores_
-            # 确保x和y长度相等
-            x_range = np.arange(len(cv_scores)) * 5 + min(20, len(X.columns))
-            plt.plot(x_range, cv_scores)
-        else:
-            cv_scores = None
-        
-        # 保存图表
-        clean_target = clean_filename(target_name)
-        plt.tight_layout()
-        plt.savefig(f'rfecv_curve_{clean_target}.png', dpi=300)
-        plt.close()
-        
-        # 获取特征重要性
-        # 使用选中的特征重新训练随机森林来获取特征重要性
         forest = RandomForestRegressor(n_estimators=200, max_depth=5, random_state=42, n_jobs=-1)
         forest.fit(X_selected, y_valid)
         importances = forest.feature_importances_
-
+        
         # 将特征和重要性配对
         feature_importances = [(feature, importance) 
                               for feature, importance in zip(selected_features, importances)]
+        
         # 按重要性降序排序
         feature_importances.sort(key=lambda x: x[1], reverse=True)
+        
         # 创建结果字典
         result_dict = {
+            'substance_name': substance_name,
             'target_name': target_name,
             'n_features': selector.n_features_,
             'r2_score': selector.score(X_scaled, y_valid),
@@ -371,46 +369,67 @@ def perform_feature_selection(X, y, target_name):
             'feature_importances': feature_importances,
             'feature_ranking': selector.ranking_.tolist()
         }
-        # 添加交叉验证结果
-        if cv_scores is not None:
-            result_dict['cv_scores'] = cv_scores.tolist()
-            result_dict['cv_features'] = x_range.tolist()
         return result_dict
+    
     except Exception as e:
-        return "feature selection error"
+        return f"特征选择过程中出错 ({substance_name} - {target_name}): {str(e)}"
+
+def aggregate_and_save_per_substance(selection_results):
+    """按物质聚合多个因变量实验的特征分数，输出每个物质的合并排序结果"""
+    for substance_name, substance_results in selection_results.items():
+        # 收集该物质在不同目标变量中的所有选中特征及其分数
+        collected = []
+        for target_name, result in substance_results.items():
+            if result is None:
+                continue
+            for feature, importance in result['feature_importances']:
+                collected.append((feature, importance))
+        
+        sum_scores = {}
+        count_scores = {}
+        for feature, importance in collected:
+            sum_scores[feature] = sum_scores.get(feature, 0.0) + float(importance)
+            count_scores[feature] = count_scores.get(feature, 0) + 1
+        avg_scores = {f: (sum_scores[f] / count_scores[f]) for f in sum_scores}
+        
+        total_experiments = len([r for r in substance_results.values() if r is not None])
+        total_selected_features = len(collected)
+        features_to_select = total_selected_features // max(1, total_experiments)
+        if features_to_select <= 0:
+            features_to_select = len(avg_scores)
+        
+        # 排序并取前N个不重复特征
+        sorted_items = sorted(avg_scores.items(), key=lambda x: x[1], reverse=True)
+        top_items = sorted_items[:features_to_select]
+        
+        # 保存到CSV
+        clean_substance = clean_filename(substance_name)
+        out_df = pd.DataFrame(top_items, columns=['feature', 'score'])
+        out_df.to_csv(f'top_ranked_features_{clean_substance}.csv', encoding='utf-8-sig', index=False)
 
 def feature_selection(features_matrix_path: str, target_variables_path: str, tool_context: ToolContext) -> str:
-    features_matrix = pd.read_csv(features_matrix_path, encoding='utf-8-sig')
-    target_variables = pd.read_csv(target_variables_path, encoding='utf-8-sig')
+    feature_files = glob.glob('features_Substance*.csv')
+    target_variables = pd.read_csv('target_variables.csv', encoding='utf-8-sig')
     selection_results = {}
-    for col in target_variables.columns:
-        clean_target_name = clean_filename(col)
-        y = target_variables[col]
-        result = perform_feature_selection(features_matrix, y, col)
-        if isinstance(result,str):
-            return result
-        
-        selection_results[col] = result
-        selected_features_df = features_matrix[result['selected_features']]
-        selected_features_df.to_csv(f'selected_features_{clean_target_name}.csv', encoding='utf-8-sig')
-        target_df = pd.DataFrame(y)
-        target_df.to_csv(f'target_{clean_target_name}.csv', encoding='utf-8-sig')
-        importance_df = pd.DataFrame(result['feature_importances'], 
-                                          columns=['feature', 'importance'])
-        importance_df.to_csv(f'feature_importance_{clean_target_name}.csv', encoding='utf-8-sig')
-        if 'cv_scores' in result and 'cv_features' in result:
-            cv_results_df = pd.DataFrame({
-                'n_features': result['cv_features'],
-                'cv_score': result['cv_scores']
-            })
-            cv_results_df.to_csv(f'cv_results_{clean_target_name}.csv', encoding='utf-8-sig')    
-    summary_data = {}
-    for target_name, result in selection_results.items():
-        summary_data[target_name] = {
-            '选择的特征数量': result['n_features'],
-            'R²得分': result['r2_score']
-        }                        
-    summary_df = pd.DataFrame(summary_data).T
-    summary_df.to_csv('feature_selection_summary.csv', encoding='utf-8-sig')
+    for feature_file in feature_files:
+        substance_name = feature_file.replace('features_', '').replace('.csv', '')
+        features_matrix = pd.read_csv(feature_file, encoding='utf-8-sig')
+        substance_results = {}
+        for col in target_variables.columns:
+            clean_target_name = clean_filename(col)
+            clean_substance_name = clean_filename(substance_name)
+            y = target_variables[col]
+            result = perform_feature_selection(features_matrix, y, col, substance_name)
+            if isinstance(result, str):
+                return result
+            substance_results[col] = result
+            importance_df = pd.DataFrame(result['feature_importances'], columns=['feature', 'score'])
+            importance_df.to_csv(
+                f'selected_features_with_scores_{clean_substance_name}_{clean_target_name}.csv',
+                encoding='utf-8-sig', index=False
+            )
+        selection_results[substance_name] = substance_results
+    aggregate_and_save_per_substance(selection_results)
+    total_experiments = sum(len(substance_results) for substance_results in selection_results.values())
     return f"feature selection done. Successfully process {len(selection_results)} target variables. The results are saved to each csv files."
     

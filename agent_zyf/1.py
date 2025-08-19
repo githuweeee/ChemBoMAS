@@ -54,7 +54,7 @@ def calculate_descriptors_parallel(smiles_list):
     
     if not valid_smiles:
         return [], len(smiles_list)
-    print(smiles_list)
+    
     try:
         with ProcessPoolExecutor(max_workers=n_jobs) as executor:
             results = list(executor.map(calculate_descriptors, valid_smiles))
@@ -138,6 +138,13 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
         if not target_columns:
             return "Error: 未找到目标变量列"
         
+        # 首先收集所有物质的ratio数据
+        all_ratio_data = {}
+        for group in substance_groups:
+            substance_name = group['name']
+            ratio_data = pd.to_numeric(df[group['ratio_col']].astype(str).str.strip(), errors='coerce')
+            all_ratio_data[substance_name] = ratio_data
+        
         # 处理每个物质组
         all_features = []
         substance_info = {}
@@ -145,13 +152,13 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
         for group in substance_groups:
             substance_name = group['name']
             
-            # 提取SMILES和比例数据
+            # 提取SMILES数据
             smiles_data = df[group['smile_col']].astype(str).str.strip()
-            ratio_data = pd.to_numeric(df[group['ratio_col']].astype(str).str.strip(), errors='coerce')
             
             # 过滤有效的SMILES
             valid_mask = (smiles_data != 'nan') & (smiles_data != '') & (smiles_data.notna())
             valid_smiles = smiles_data[valid_mask].unique()
+
             if len(valid_smiles) == 0:
                 continue
             
@@ -173,10 +180,11 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
                 # 创建特征矩阵
                 features_df = pd.DataFrame()
                 
-                # 添加比例列
-                features_df[f'{substance_name}_ratio'] = ratio_data
+                # 首先添加所有物质的ratio列到前面
+                for ratio_substance_name, ratio_data in all_ratio_data.items():
+                    features_df[f'{ratio_substance_name}_ratio'] = ratio_data
                 
-                # 添加描述符列
+                # 添加描述符列（保持原来的逻辑不变）
                 all_desc_keys = set()
                 for desc_dict in desc_map.values():
                     if desc_dict:
@@ -185,7 +193,7 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
                 for key in all_desc_keys:
                     features_df[f'{substance_name}_{key}'] = np.nan
                 
-                # 填充描述符值
+                # 填充描述符值（保持原来的逻辑不变）
                 for idx, row in df.iterrows():
                     smile = str(row[group['smile_col']]).strip()
                     if smile in desc_map and desc_map[smile]:
