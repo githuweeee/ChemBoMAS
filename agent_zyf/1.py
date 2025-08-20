@@ -183,6 +183,7 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
                 # 首先添加所有物质的ratio列到前面
                 for ratio_substance_name, ratio_data in all_ratio_data.items():
                     features_df[f'{ratio_substance_name}_ratio'] = ratio_data
+                #features_df[f'{substance_name}_ratio'] = all_ratio_data[substance_name]
                 
                 # 添加描述符列（保持原来的逻辑不变）
                 all_desc_keys = set()
@@ -235,7 +236,7 @@ def generate_multi_substance_descriptors(file_path: str, tool_context=None) -> s
                 combined_features.insert(0, 'experiment_round', df[experiment_col])
         
         # 保存合并后的特征矩阵
-        combined_features.to_csv('features_matrix_combined.csv', index=False, encoding='utf-8-sig')
+        #combined_features.to_csv('features_matrix_combined.csv', index=False, encoding='utf-8-sig')
         
         # 保存目标变量
         targets_df = df[target_columns]
