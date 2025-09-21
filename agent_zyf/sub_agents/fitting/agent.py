@@ -2,7 +2,6 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -12,27 +11,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The Fitting Agent for the ChemBoMAS system."""
+"""The Enhanced Fitting Agent for the ChemBoMAS system."""
 
 import os
-from google.adk.agents import Agent
+import logging
+from google.adk.agents import LlmAgent
 from google.adk.agents.callback_context import CallbackContext
+
 from .prompts import return_instructions_fitting
 from . import tools
 
+FITTING_AGENT_MODEL = os.getenv("FITTING_AGENT_MODEL", "gemini-2.5-flash")
 
 def check_prerequisites(callback_context: CallbackContext) -> None:
-    """Checks if the required data paths exist in the session state."""
-    required_keys = ["descriptors_path", "verified_data_path"]
+    """检查Enhanced Fitting Agent的前提条件"""
+    required_keys = [
+        "baybe_campaign"
+    ]
+    
+    missing_keys = []
     for key in required_keys:
         if key not in callback_context.state:
-            raise ValueError(f"`{key}` not found in session state.")
+            missing_keys.append(key)
+    
+    if missing_keys:
+        raise ValueError(f"Fitting Agent前提条件不满足，缺少: {', '.join(missing_keys)}")
+    
+    # 检查是否有足够的实验数据进行分析
+    campaign = callback_context.state.get("baybe_campaign")
+    if campaign and hasattr(campaign, 'measurements'):
+        measurement_count = len(campaign.measurements)
+        if measurement_count < 1:
+            raise ValueError("需要至少1轮实验数据才能进行分析")
 
-
-fitting_agent = Agent(
-    model=os.getenv("OAI_MODEL", "gpt-4-turbo"),
-    name="fitting_agent",
+fitting_agent = LlmAgent(
+    model=FITTING_AGENT_MODEL,
+    name="fitting_agent", 
     instruction=return_instructions_fitting(),
-    tools=[tools.analyze_and_visualize_results],
+    description="Analyze BayBE Campaign performance, create interpretable models, and generate optimization reports",
+    tools=[
+        tools.analyze_campaign_performance,
+        tools.create_interpretable_model,
+        tools.generate_optimization_report,
+    ],
     before_agent_callback=check_prerequisites,
-) 
+)

@@ -19,6 +19,14 @@ import shutil
 import uuid
 from google.adk.tools import ToolContext
 import pandas as pd
+import numpy as np
+from rdkit import Chem
+from mordred import Calculator, descriptors
+from concurrent.futures import ProcessPoolExecutor
+import warnings
+import multiprocessing
+import re
+warnings.filterwarnings('ignore')
 
 def handle_file_upload(file_path: str, tool_context: ToolContext) -> str:
     """
@@ -28,7 +36,7 @@ def handle_file_upload(file_path: str, tool_context: ToolContext) -> str:
     If it's a subsequent upload, it updates the data for the next iteration.
 
     Args:
-        file_path: The local path to the user's uploaded CSV file.
+        file_path: The local path to the user's uploaded CSV file OR the CSV content directly.
         tool_context: The context for the current tool execution.
 
     Returns:
@@ -37,7 +45,16 @@ def handle_file_upload(file_path: str, tool_context: ToolContext) -> str:
     state = tool_context.state
     session_id = state.get("session_id")
 
-    if not os.path.exists(file_path):
+    # Check if file_path is actually file content (contains CSV data)
+    # This happens when ADK passes file content directly instead of file path
+    if ',' in file_path and '\n' in file_path and not os.path.exists(file_path):
+        # file_path is actually CSV content, write it to a temporary file
+        temp_file_path = f"temp_uploaded_data_{uuid.uuid4().hex[:8]}.csv"
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            f.write(file_path)
+        file_path = temp_file_path
+        print(f"Received CSV content directly, wrote to temporary file: {file_path}")
+    elif not os.path.exists(file_path):
         return f"Error: The file '{file_path}' does not exist."
 
     # Case 1: First upload, session needs to be initialized.

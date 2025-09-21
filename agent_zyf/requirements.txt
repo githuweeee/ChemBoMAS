@@ -1,0 +1,8 @@
+pandas==2.2.2
+numpy==1.26.4
+rdkit==2024.9.3
+mordred==1.2.0
+scikit-learn==1.6.1
+matplotlib==3.9.2
+seaborn==0.13.2
+setuptools==75.1.0

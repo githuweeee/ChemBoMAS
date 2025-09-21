@@ -18,41 +18,43 @@ import os
 from google.adk.agents import LlmAgent
 
 # Import sub-agents
+from .sub_agents.searchspace_construction.agent import searchspace_construction_agent
+from .sub_agents.recommender.agent import recommender_agent
+from .sub_agents.fitting.agent import fitting_agent
 
 # Import orchestrator-specific components
-from .prompts import return_instructions_orchestrator,return_instructions_verification, return_instructions_descriptor
+from .prompts import return_instructions_orchestrator, return_instructions_enhanced_verification
 from . import tools
+from .enhanced_verification_tools import enhanced_verification, collect_optimization_goals, diagnose_data_types
 
-descriptor_agent = LlmAgent(
-    name = "verification_agent", 
-    model = "gemini-2.5-flash",
-    instruction = return_instructions_descriptor(),
-    description="verify data",
-    tools = [tools.generate_descriptor],
-    output_key="generate descriptor"
-)
-
-verification_agent = LlmAgent(
-    name = "verification_agent",
-    model = "gemini-2.5-flash",
-    instruction = return_instructions_verification(),
-    description="verify data",
-    tools = [tools.verification],
-    output_key="verification"
+# Enhanced Verification Agent - 合并了原来的verification和descriptor功能
+enhanced_verification_agent = LlmAgent(
+    name="enhanced_verification_agent",
+    model="gemini-2.5-flash",
+    instruction=return_instructions_enhanced_verification(),
+    description="Enhanced data verification, SMILES validation, and user interaction for optimization configuration",
+    tools=[
+        enhanced_verification,           # 主要的增强验证功能（7个任务）
+        collect_optimization_goals,      # 收集用户优化目标
+        diagnose_data_types,            # 诊断数据类型问题
+        tools.verification,              # 保留原有的基础验证作为备用
+    ],
+    output_key="enhanced_verification"
 )
 
 
 # Define the main Orchestrator Agent
 root_agent = LlmAgent(
-    model= "gemini-2.5-flash",
+    model="gemini-2.5-flash",
     name="orchestrator_agent",
     instruction=return_instructions_orchestrator(),
-    sub_agents=[verification_agent,descriptor_agent],
+    sub_agents=[
+        enhanced_verification_agent,     # 数据验证、SMILES验证、用户交互
+        searchspace_construction_agent,  # BayBE搜索空间构建  
+        recommender_agent,               # 实验推荐和迭代优化
+        fitting_agent,                   # 模型分析与可视化
+    ],
     tools=[
-        #verification_agent,
-        #descriptor_optimization_agent,
-        #recommender_agent,
-        #fitting_agent,
         tools.handle_file_upload,
     ],
 ) 
