@@ -4,7 +4,7 @@
 - **项目名称**: ChemBoMAS Agent (Chemical Bayesian Optimization Multi-Agent System)
 - **版本**: v1.0.0
 - **创建日期**: 2025年1月
-- **最后更新**: 2025年1月
+- **最后更新**: 2025年9月
 - **优化引擎**: BayBE (EMD Group贝叶斯优化框架)
 
 ## 目录
@@ -107,7 +107,7 @@ temperature_target = NumericalTarget(
 
 **优化前（5个Agent）**:
 1. Verification Agent
-2. **Descriptor Agent** ❌ （纯计算任务，无用户交互）
+2. **Descriptor Agent** ❌ 已删除（纯计算任务，无用户交互）
 3. SearchSpace Construction Agent
 4. Recommender Agent  
 5. Fitting Agent
@@ -168,10 +168,6 @@ graph TD
     style E fill:#fce4ec
     style F fill:#f1f8e9
 ```
-
-**🔑 关键突破**: 虚线表示BayBE的内部自动处理 - 我们无需手动计算、存储或传递任何分子描述符！
-
----
 
 ## 智能体详细规范
 
