@@ -25,20 +25,12 @@ FITTING_AGENT_MODEL = os.getenv("FITTING_AGENT_MODEL", "gemini-2.5-flash")
 
 def check_prerequisites(callback_context: CallbackContext) -> None:
     """检查Enhanced Fitting Agent的前提条件"""
-    required_keys = [
-        "baybe_campaign"
-    ]
-    
-    missing_keys = []
-    for key in required_keys:
-        if key not in callback_context.state:
-            missing_keys.append(key)
-    
-    if missing_keys:
-        raise ValueError(f"Fitting Agent前提条件不满足，缺少: {', '.join(missing_keys)}")
+    # 尝试从缓存恢复campaign（避免state未保存对象导致的误报）
+    campaign = tools._ensure_campaign_in_state(callback_context.state)
+    if campaign is None:
+        raise ValueError("Fitting Agent前提条件不满足，缺少: baybe_campaign")
     
     # 检查是否有足够的实验数据进行分析
-    campaign = callback_context.state.get("baybe_campaign")
     if campaign and hasattr(campaign, 'measurements'):
         measurement_count = len(campaign.measurements)
         if measurement_count < 1:

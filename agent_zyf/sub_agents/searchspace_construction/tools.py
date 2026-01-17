@@ -19,6 +19,16 @@ import json
 from datetime import datetime
 from google.adk.tools import ToolContext
 
+
+def _read_csv_clean(path: str) -> pd.DataFrame:
+    """
+    读取 CSV 并清理列名（去 BOM/空白，移除常见索引列如 Unnamed: 0）
+    """
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    df.columns = [c.replace("\ufeff", "").strip() for c in df.columns]
+    df = df.loc[:, ~df.columns.str.match(r"^Unnamed:\s*\d+$")]
+    return df
+
 # BayBE导入
 try:
     from baybe import Campaign
@@ -103,7 +113,7 @@ def _build_baybe_campaign(verification_results: dict,
         if not standardized_data_path or not os.path.exists(standardized_data_path):
             return {"success": False, "error": "标准化数据文件不存在"}
         
-        df = pd.read_csv(standardized_data_path)
+        df = _read_csv_clean(standardized_data_path)
         
         # 2. 创建BayBE参数
         parameters = _create_baybe_parameters(df, verification_results)
@@ -138,7 +148,7 @@ def _build_baybe_campaign(verification_results: dict,
             "molecule_parameters": len([p for p in parameters if isinstance(p, CategoricalParameter)]),
             "numerical_parameters": len([p for p in parameters if isinstance(p, NumericalContinuousParameter)]),
             "constraint_count": len(constraints),
-            "searchspace_size": len(searchspace.discrete)
+            "searchspace_size": len(searchspace.discrete.exp_rep) if searchspace.discrete is not None else "continuous"
         }
         
         return {
@@ -388,8 +398,8 @@ def get_campaign_info(tool_context: ToolContext) -> str:
 - 目标名称: {', '.join([t.name for t in campaign.objective.targets])}
 
 📊 **搜索空间状态**:
-- 离散参数数: {len(campaign.searchspace.discrete) if hasattr(campaign.searchspace, 'discrete') else 'N/A'}
-- 连续参数数: {len(campaign.searchspace.continuous) if hasattr(campaign.searchspace, 'continuous') else 'N/A'}
+- 离散参数数: {len(campaign.searchspace.discrete.exp_rep) if hasattr(campaign.searchspace, 'discrete') and campaign.searchspace.discrete is not None else 'N/A'}
+- 连续参数数: {len(campaign.searchspace.continuous.parameter_names) if hasattr(campaign.searchspace, 'continuous') and campaign.searchspace.continuous is not None else 'N/A'}
 
 🔄 **Campaign状态**:
 - 是否有历史数据: {'是' if hasattr(campaign, 'measurements') and len(campaign.measurements) > 0 else '否'}

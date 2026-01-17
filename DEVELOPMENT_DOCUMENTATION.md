@@ -545,23 +545,27 @@ output_params = {
 
 #### 主要任务
 1. **实验推荐**: 基于准备好的BayBE Campaign生成最优实验条件
-2. **结果回传处理**: 接收用户实验结果并验证数据完整性
-3. **Campaign更新**: 使用`campaign.add_measurements()`更新BayBE状态
-4. **获取函数优化**: 根据历史数据动态调整acquisition function
-5. **迭代管理**: 管理完整的BO循环和状态跟踪
-6. **收敛监控**: 分析优化进度并提供停止建议
+2. **结果模板生成**: 自动生成符合推荐的实验结果上传模板
+3. **结果回传处理**: 接收用户实验结果并验证数据完整性
+4. **Campaign更新**: 使用`campaign.add_measurements()`更新BayBE状态
+5. **获取函数优化**: 根据历史数据动态调整acquisition function
+6. **迭代管理**: 管理完整的BO循环和状态跟踪
+7. **收敛监控**: 分析优化进度并提供停止建议
+8. **健康检查**: 实时诊断系统状态和Campaign准备情况
 
 #### 实现目标
 - 实现高效的贝叶斯优化 (收敛速度提升 > 30%)
 - 支持多目标优化 (Pareto前沿、加权组合)
 - 提供推荐的不确定性量化
 - 智能化迭代管理和收敛检测
+- 用户友好的结果上传流程
 
 #### 🔑 **架构简化优势**
 **接收即用型BayBE Campaign，专注于优化逻辑**：
 - ✅ 直接使用准备好的Campaign对象
 - ✅ 无需重新处理SMILES或描述符
 - ✅ 专注于推荐策略和实验设计
+- ✅ 自动化模板生成，简化用户操作
 
 #### 输入参数
 ```python
@@ -583,6 +587,8 @@ input_params = {
 output_params = {
     "baybe_campaign": Campaign,  # BayBE Campaign对象
     "recommendations": pd.DataFrame,  # 推荐的实验条件
+    "recommendation_file": str,  # 推荐结果CSV文件路径
+    "result_template": str,  # 结果上传模板文件路径
     "acquisition_values": [],  # 获取函数值
     "uncertainty_estimates": [],  # 不确定性估计
     "optimization_progress": {
@@ -595,17 +601,100 @@ output_params = {
         "gp_hyperparameters": dict,
         "model_likelihood": float,
         "prediction_variance": []
+    },
+    "system_health": {  # 新增：系统健康状态
+        "campaign_valid": bool,
+        "campaign_ready": bool,
+        "optimization_round": int,
+        "awaiting_results": bool
     }
 }
 ```
 
+#### 可用工具列表
+
+Recommender Agent提供以下5个核心工具：
+
+1. **generate_recommendations(batch_size)** - 生成实验推荐
+   - 输入: batch_size (str) - 推荐数量，支持数字或"auto"
+   - 输出: 推荐的实验条件和保存文件路径
+   
+2. **generate_result_template()** - 生成结果上传模板
+   - 输入: 无（自动使用最新推荐）
+   - 输出: 标准化的CSV模板文件路径和填写说明
+   
+3. **upload_experimental_results(results_file_path)** - 上传实验结果
+   - 输入: 文件路径或CSV内容字符串
+   - 输出: 上传状态和Campaign更新摘要
+   
+4. **check_convergence()** - 检查优化收敛性
+   - 输入: 无（自动分析当前Campaign）
+   - 输出: 收敛分析和继续/停止建议
+   
+5. **check_agent_health()** - 系统健康检查
+   - 输入: 无
+   - 输出: 详细的系统状态诊断报告
+
 #### 实验结果回传机制设计
+
+**1. 结果模板自动生成**:
+```python
+def generate_result_template(tool_context: ToolContext) -> str:
+    """
+    自动生成实验结果上传模板
+    
+    功能:
+    - 从最新推荐中提取参数列
+    - 自动填写推荐的参数值
+    - 添加空的目标列（待用户填写）
+    - 包含元数据列（实验ID、日期、操作员、备注）
+    
+    输出:
+    - result_template_[session_id]_[timestamp].csv
+    - 详细的填写说明和要求
+    """
+    state = tool_context.state
+    campaign = state.get("baybe_campaign")
+    latest_recommendations = state.get("latest_recommendations")
+    
+    # 创建模板DataFrame
+    template_data = {}
+    
+    # 1. 参数列（已填写推荐值）
+    recommendations_df = pd.DataFrame(latest_recommendations)
+    for param_name in campaign.searchspace.parameter_names:
+        if param_name in recommendations_df.columns:
+            template_data[param_name] = recommendations_df[param_name].tolist()
+    
+    # 2. 目标列（待填写）
+    for target in campaign.objective.targets:
+        template_data[target.name] = ["<请填写测量值>"] * len(latest_recommendations)
+    
+    # 3. 元数据列（可选）
+    template_data["experiment_id"] = [f"EXP_{i+1:03d}" for i in range(len(latest_recommendations))]
+    template_data["experiment_date"] = ["<YYYY-MM-DD>"] * len(latest_recommendations)
+    template_data["operator"] = ["<操作员>"] * len(latest_recommendations)
+    template_data["notes"] = ["<备注>"] * len(latest_recommendations)
+    
+    # 保存模板
+    template_df = pd.DataFrame(template_data)
+    template_file = f"result_template_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    template_df.to_csv(template_file, index=False)
+    
+    return template_file  # 返回文件路径和说明
+```
 
 **2. 标准化实验结果上传接口**:
 ```python
 class ExperimentalResultsHandler:
     """
-    处理用户实验结果回传的标准化接口
+    处理用户实验结果回传的标准化接口（增强版）
+    
+    主要功能:
+    1. 智能识别文件路径 vs CSV内容
+    2. 格式验证和数据预处理
+    3. Campaign自动更新
+    4. 详细的错误提示和解决建议
     """
     
     def validate_experimental_results(self, results: pd.DataFrame, campaign: Campaign) -> dict:

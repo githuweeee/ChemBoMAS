@@ -38,6 +38,25 @@ except ImportError as e:
     ML_AVAILABLE = False
 
 
+def _ensure_campaign_in_state(state: dict):
+    """确保baybe_campaign在state中可用（必要时从缓存恢复）"""
+    campaign = state.get("baybe_campaign")
+    if campaign is not None:
+        return campaign
+
+    session_id = state.get("session_id", "unknown")
+    try:
+        from ..recommender import tools as recommender_tools
+        campaign = recommender_tools._get_campaign_from_cache(session_id)
+    except Exception:
+        campaign = None
+
+    if campaign is not None:
+        state["baybe_campaign"] = campaign
+
+    return campaign
+
+
 def analyze_campaign_performance(tool_context: ToolContext) -> str:
     """
     分析BayBE Campaign的性能和优化效果
@@ -49,7 +68,7 @@ def analyze_campaign_performance(tool_context: ToolContext) -> str:
         return "❌ BayBE未安装，无法进行性能分析。"
     
     try:
-        campaign = state.get("baybe_campaign")
+        campaign = _ensure_campaign_in_state(state)
         current_round = state.get("optimization_round", 0)
         
         if not campaign:
@@ -98,7 +117,7 @@ def create_interpretable_model(tool_context: ToolContext) -> str:
         return "❌ 缺少必要依赖，无法创建代理模型。"
     
     try:
-        campaign = state.get("baybe_campaign")
+        campaign = _ensure_campaign_in_state(state)
         
         if not campaign or not hasattr(campaign, 'measurements') or len(campaign.measurements) < 5:
             return "⚠️ 实验数据不足，无法训练可靠的代理模型。建议至少进行5轮实验。"
@@ -159,7 +178,7 @@ def generate_optimization_report(report_type: str, tool_context: ToolContext) ->
     session_id = state.get("session_id", "unknown")
     
     try:
-        campaign = state.get("baybe_campaign")
+        campaign = _ensure_campaign_in_state(state)
         performance_analysis = state.get("performance_analysis", {})
         interpretable_models = state.get("interpretable_models", {})
         current_round = state.get("optimization_round", 0)

@@ -12,13 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The main Orchestrator Agent for the ChemBoMAS system."""
+"""The main Orchestrator Agent for the ChemBoMAS system.
+
+Simplified Architecture (3 sub-agents):
+1. Enhanced Verification Agent - 数据验证、SMILES验证、用户交互
+2. Recommender Agent - Campaign构建 + 实验推荐 + 迭代优化 (合并了原SearchSpace Construction)
+3. Fitting Agent - 模型分析与可视化
+
+Workflow:
+Enhanced Verification → Recommender → Fitting
+                            ↑_____|
+                       (iterative loop)
+"""
 
 import os
 from google.adk.agents import LlmAgent
 
-# Import sub-agents
-from .sub_agents.searchspace_construction.agent import searchspace_construction_agent
+# Import sub-agents (simplified: removed searchspace_construction_agent)
 from .sub_agents.recommender.agent import recommender_agent
 from .sub_agents.fitting.agent import fitting_agent
 
@@ -50,8 +60,7 @@ root_agent = LlmAgent(
     instruction=return_instructions_orchestrator(),
     sub_agents=[
         enhanced_verification_agent,     # 数据验证、SMILES验证、用户交互
-        searchspace_construction_agent,  # BayBE搜索空间构建  
-        recommender_agent,               # 实验推荐和迭代优化
+        recommender_agent,               # Campaign构建 + 实验推荐 + 迭代优化
         fitting_agent,                   # 模型分析与可视化
     ],
     tools=[

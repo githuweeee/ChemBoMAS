@@ -36,8 +36,14 @@ ENV/
 
 # Session data and temporary files
 sessions/
+baybe_doc/
 temp_*.csv
 standardized_data_*.csv
+data_round_*.csv
+experiment_log_*.csv
+result_template_*.csv
+optimization_report_*.txt
+optimization_trajectory_*.png
 
 # IDE
 .vscode/
@@ -61,3 +67,9 @@ Thumbs.db
 # Data files (temporary/processed)
 *.pkl
 *.pickle
+
+# Test and example data files (exclude specific ones)
+benchmark.csv
+example3_spacecorrected*.csv
+MDresults.xlsx
+# Keep essential examples: example2.csv, initial_data.csv
