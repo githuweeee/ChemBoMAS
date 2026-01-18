@@ -229,124 +229,13 @@ adk web --host 0.0.0.0 --port 8080
 3.  **Run Experiments & Upload**: Download the provided template or use the unified `experiment_log.csv`. Fill in results and upload back to the chat interface.
 4.  **Analyze & Iterate**: The system automatically updates the model. You can request visualization or check convergence status at any time.
 
-### Detailed Operation Manual
 
-#### 验证安装
-
-安装依赖后，运行以下脚本验证环境配置是否正确：
-
-```python
-# 运行此验证脚本
-python -c "
-import pandas as pd
-import numpy as np
-import rdkit
-import mordred
-import sklearn
-import matplotlib
-import seaborn
-
-print('✓ Package verification successful!')
-print(f'pandas: {pd.__version__}')
-print(f'numpy: {np.__version__}')
-print(f'rdkit: {rdkit.__version__}')
-print(f'mordred: {mordred.__version__}')
-print(f'scikit-learn: {sklearn.__version__}')
-print(f'matplotlib: {matplotlib.__version__}')
-print(f'seaborn: {seaborn.__version__}')
-print('All dependencies are correctly installed!')
-"
-```
-
-#### 环境配置
-
-在项目根目录创建 `.env` 文件并添加以下配置：
-
-```bash
-# Google ADK 配置
-GOOGLE_API_KEY=your_google_api_key_here
-GOOGLE_GENAI_USE_VERTEXAI=FALSE
-
-# 日志配置
-LOG_LEVEL=INFO
-LOG_FILE=logs/chembonas.log
-```
-
-#### 实验结果上传
-
-收到实验推荐后，请按以下步骤上传结果：
-
-**方法 1：使用自动生成的模板（推荐）**
-
-```python
-# 1. 生成推荐
-recommendations = generate_recommendations(batch_size=5)
-
-# 2. 生成结果上传模板
-template = generate_result_template()
-# 这将创建文件：result_template_[session_id]_[timestamp].csv
-
-# 3. 进行实验并在模板中填写测量值
-
-# 4. 上传结果（文件路径）
-result = upload_experimental_results("result_template_filled.csv")
-
-# 5. 检查优化进度
-progress = check_convergence()
-```
-
-**方法 2：直接上传 CSV 内容**
-
-```python
-# 直接粘贴 CSV 内容上传
-csv_content = """
-SubstanceA_molecule,SubstanceA_ratio,SubstanceB_molecule,SubstanceB_ratio,Target_yield,Target_quality
-CC(C)O,0.6,NCCCN,0.4,87.5,4.2
-CCO,0.7,NCCCCN,0.3,89.2,4.5
-"""
-
-result = upload_experimental_results(csv_content)
-```
-
-#### 系统健康检查
-
-您可以随时检查系统状态：
-
-```python
-health = check_agent_health()
-# 输出：系统状态、Campaign 就绪情况、优化轮次等
-```
-
-#### 完整优化循环示例
-
-```python
-# 第一轮
-recommendations = generate_recommendations("3")  # 获取 3 个实验推荐
-template = generate_result_template()            # 生成模板
-# ... 进行实验 ...
-upload_experimental_results("results.csv")       # 上传结果
-check_convergence()                              # 检查进度
-
-# 第二轮（如未收敛）
-recommendations = generate_recommendations("3")  # 获取新推荐
-# ... 重复循环 ...
-```
-
----
 
 ## 📂 Documentation / 文档
 
-详细文档请参阅 `docs/` 目录。主要包括：
-- `docs/examples/` - 示例数据与用例
+详细文档请参阅
 - `快速开始指南.md` - 快速入门教程
 
----
-
-## 🤝 Contributing / 贡献
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) (if available) and check the `docs/` folder for architectural details.
-
----
 
 ## 📄 License
 
