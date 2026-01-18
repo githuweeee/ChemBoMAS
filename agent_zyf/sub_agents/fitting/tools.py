@@ -39,8 +39,9 @@ except ImportError as e:
 
 
 def _ensure_campaign_in_state(state: dict):
-    """确保baybe_campaign在state中可用（必要时从缓存恢复）"""
-    campaign = state.get("baybe_campaign")
+    """确保baybe_campaign可用（避免在state中保存不可序列化对象）"""
+    # 如果state中已有Campaign对象，先取出并移除，避免序列化失败
+    campaign = state.pop("baybe_campaign", None)
     if campaign is not None:
         return campaign
 
@@ -50,9 +51,6 @@ def _ensure_campaign_in_state(state: dict):
         campaign = recommender_tools._get_campaign_from_cache(session_id)
     except Exception:
         campaign = None
-
-    if campaign is not None:
-        state["baybe_campaign"] = campaign
 
     return campaign
 

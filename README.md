@@ -85,44 +85,41 @@ NumericalContinuousParameter(
 
 因此，系统的边界建议最终需要用户确认后才能用于BayBE。
 
-## Workflow
+## 工作流程
 
-The agent follows these main steps:
+本系统（Agent）主要遵循以下步骤进行化学实验优化：
 
-1.  **Data Upload**: The user uploads a CSV file containing chemical reaction data. This includes substance names, their SMILES strings, ratios, and target experimental outcomes (e.g., yield, cost).
+1.  **数据上传**：用户上传包含化学反应信息的CSV文件。该文件应包含各物质名称、SMILES结构、比例参数以及实验目标值（如产率、成本等）。
 
-2.  **Data Verification**: The system first verifies the uploaded data to ensure it conforms to the required format, checking for correctly named columns for substances and targets. If header rows contain natural-language descriptions, verification will stop and request a clean template.
+2.  **数据验证**：系统首先验证上传数据格式是否合法，检查各物质和目标的列名是否符合规范。如果表头有自然语言描述（如非机器可识别字段），系统会中止并提示使用标准模板。
 
-3.  **Parameter Preparation and SearchSpace Construction**:
-    *   Enhanced Verification validates SMILES and extracts adjustable parameters.
-    *   BayBE handles molecular descriptor computation internally in the main workflow (no manual descriptor calculation).
-    *   The system constructs a BayBE-compatible search space and applies constraints/bounds.
-    *   Optional legacy tool `generate_descriptor` still uses `rdkit`/`mordred` for standalone descriptor export.
+3.  **参数提取与搜索空间构建**：
+    * 增强验证工具会校验SMILES格式，有效提取可调整的参数。
+    * 分子描述符（molecular descriptor）的计算由BayBE主流程自动完成，无需用户手动生成。
+    * 系统按照BayBE要求构建搜索空间并施加参数约束。
+    * （补充：`generate_descriptor`为遗留工具，仅在需手动导出描述符时使用，依赖rdkit/mordred）
 
-4.  **Bayesian Optimization and Experiment Recommendation**:
-    *   Using the constructed search space, the agent employs BayBE (Bayesian Optimization for Black-box Experiments) to recommend the next batch of experiments.
-    *   BayBE's internal algorithms handle feature optimization and descriptor processing automatically.
-    *   The goal is to efficiently explore the experimental space to find optimal conditions with minimal experiments.
+4.  **贝叶斯优化与实验推荐**：
+    * 系统利用构建好的搜索空间，通过BayBE（Bayesian Optimization for Black-box Experiments）推荐下一批实验条件。
+    * BayBE内部算法会自动处理特征优化与描述符计算。
+    * 目标是以尽可能少的实验，找到最优实验组合，实现高效探索。
 
-5.  **Experiment Result Upload**:
-    *   After receiving recommendations, use `generate_result_template` to create a standardized upload template.
-    *   Perform experiments according to the recommended conditions.
-    *   Fill in the measured target values in the template.
-    *   Use `upload_experimental_results` to upload results (supports file path or CSV content).
-    *   The system automatically validates data format and updates the BayBE Campaign.
+5.  **实验结果上传**：
+    * 获取推荐条件后，使用`generate_result_template`生成标准上传模板，推荐直接打开session文件夹内的`experiment_log.csv`文件，按照推荐的条件实验，填写测量值。
+    * 填写后，通过`upload_experimental_results`上传数据（支持文件路径或直接输入CSV内容，推荐直接上传`experiment_log.csv`文件，如在本地运行，请记得关闭CSV文件！！！），上传成功后，系统会自动校验上传格式，并完成BayBE Campaign的数据更新。
+    * 系统会自动校验上传格式，并完成BayBE Campaign的数据更新。
 
-6.  **Analysis and Visualization**:
-    *   After the user performs the recommended experiments and uploads the results, the `fitting` agent takes over.
-    *   It trains a Random Forest model on the completed experimental data.
-    *   It generates two key visualizations:
-        *   A **Predicted vs. Actual** plot to assess model accuracy.
-        *   A **Feature Importance** plot to show which parameters have the most significant impact on the experimental outcomes.
+6.  **分析与可视化**：
+    * 用户上传结果后，`fitting`智能体会自动训练随机森林模型。
+    * 系统会输出两类可视化图表：
+        * **预测值与真实值对比图**（Predicted vs. Actual），用于判断模型精准度。
+        * **特征重要性排名图**（Feature Importance），展示各参数对实验结果的影响程度。
 
-This iterative cycle allows for continuous learning and optimization of the chemical process.
+通过上述循环，系统支持化学实验的持续迭代优化与自动学习。
 
-## Setup and Installation
+## 安装与环境部署
 
-To run this agent, you need to install the required Python dependencies.
+运行本系统前，请先安装所需的Python依赖环境。
 
 ### Telemetry notice (BayBE)
 - BayBE 默认会尝试将匿名运行指标上报到 `public.telemetry.baybe.p.uptimize.merckgroup.com:4317`，在内网/无权限环境下可能看到 `PERMISSION_DENIED` 日志，但不影响功能。
@@ -239,11 +236,11 @@ google-adk==1.12.0
 为便于发布与复现，以下为近期关键更新汇总：
 
 1. **工具调用收敛与稳定性增强**
-   - Recommender 已移除 `execute_baybe_code`（工具列表与提示中均禁用）
+   - 由于测试发现直接构建代码运行不稳定，Recommender 已移除 `execute_baybe_code`（工具列表与提示中均禁用）
    - 首次构建强制使用 `build_campaign_and_recommend`
 
 2. **离散参数禁用（仅保留连续参数）**
-   - Enhanced Verification 不再输出离散建议
+   - 实际化学研究中不应有离散参数，Enhanced Verification 不再输出离散建议
    - Campaign 构建阶段不再创建 `NumericalDiscreteParameter`
 
 3. **CSV 表头污染拦截**
@@ -252,7 +249,7 @@ google-adk==1.12.0
 
 4. **鲁棒性修复**
    - 边界计算对 `None/NaN` 做兜底处理，避免类型错误
-   - 读取 CSV 自动过滤 `Unnamed:*` 索引列
+   - 读取 CSV 自动过滤 `Unnamed:*` 空白索引列
 
 5. **文档与依赖同步**
    - `requirements.txt` 与 README 版本列表保持一致
@@ -440,6 +437,7 @@ REACTION_TYPES["new_reaction"] = {
 
 ### 参数边界推荐逻辑
 
+verification agent中会建议调整的边界，其中部分化学规则是写死的，例如固化剂的比例，催化剂的添加量，如需探索其他范围，建议修改agent_zyf\enhanced_verification_tools.py中的语句以及化学知识库agent_zyf\chemistry_knowledge_base.py。
 ```python
 def _get_ratio_bounds_from_kb(column_name, current_range, kb_suggestions):
     """
@@ -480,7 +478,7 @@ suggestions[col] = {
 
 ## 化合物名称自动映射
 
-系统会自动从原始数据中提取 SMILES → 化合物名称 的映射关系，并在推荐结果和模板中显示友好的化合物名称。
+系统会自动从原始数据中提取 SMILES → 化合物名称 的映射关系，并在推荐结果和模板中显示友好的化合物名称。但对于实际实验中，如果某一类组分的化合物没有变化，则需要手动添加名称列。
 
 ### 工作原理
 
@@ -649,3 +647,17 @@ result = upload_experimental_results("experiment_template_round_1.csv", tool_con
 - **参数调整建议**：虽然允许调整，但建议仅在特殊情况下（如实验条件限制、安全约束）才修改推荐参数
 - **格式一致性**：统一表格会保持原始格式，包括列顺序和列名
 - **状态管理**：`experiment_status` 列由系统自动管理，用户无需手动修改
+
+
+### TODOs：
+
+- ADK 前端页面改造：更清晰的多步骤向导式流程
+- 交互式实验表格：支持批量编辑、筛选、状态标记（pending/completed）
+- 实时收敛折线图：显示目标值趋势与收敛判定
+- 推荐结果对比视图：展示“推荐 vs 已完成实验”的差异
+- 参数约束可视化编辑器：比例/线性约束可视化配置
+- 获取函数选择器：qEI / qUCB / qNEI / qPI 的可视化切换
+- 模型诊断面板：不确定度、特征重要性、预测区间
+- 实验日志版本管理：轮次、时间戳、导出与回滚
+- 数据质量提示：缺失值、异常值、列名污染的即时告警
+- 可复制报告导出：一键导出优化总结（PDF/Markdown）
