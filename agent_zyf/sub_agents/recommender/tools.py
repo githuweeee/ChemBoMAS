@@ -99,6 +99,9 @@ def _build_baybe_recommender(optimization_config: dict):
     if not BAYBE_AVAILABLE:
         return None
     acquisition_function = optimization_config.get("acquisition_function", "default")
+    if acquisition_function == "auto":
+        # auto 模式仅用于建议，不在此处强制指定
+        return None
     if not acquisition_function or acquisition_function == "default":
         return None
     try:
@@ -106,6 +109,21 @@ def _build_baybe_recommender(optimization_config: dict):
     except Exception as exc:
         print(f"[WARN] 无法创建推荐器 (acquisition_function={acquisition_function}): {exc}")
         return None
+
+
+def _maybe_auto_select_acquisition_function(state: dict, recommended: str, reason: str) -> Optional[str]:
+    """
+    在未显式指定采集函数时，自动选择并写回配置。
+    仅当 acquisition_function 为 default/auto/空 时生效。
+    """
+    optimization_config = state.get("optimization_config", {})
+    current = optimization_config.get("acquisition_function", "default")
+    if current not in (None, "", "default", "auto"):
+        return None
+    optimization_config["acquisition_function"] = recommended
+    state["optimization_config"] = optimization_config
+    print(f"[DEBUG] 自动选择获取函数: {recommended} (原因: {reason})")
+    return recommended
 
 
 def _read_csv_clean(path: str) -> pd.DataFrame:
@@ -3009,12 +3027,18 @@ def check_convergence(tool_context: ToolContext) -> str:
         
         # 早期阶段检查
         if current_round < 2:
+            auto_acq = _maybe_auto_select_acquisition_function(
+                state,
+                recommended="qUCB",
+                reason="优化初期，优先探索"
+            )
             return f"""
 📊 **优化进展分析** (轮次 {current_round})
 
 🔄 **当前状态**: 优化初期
 - 完成轮次: {current_round}
 - 建议: 继续收集更多实验数据
+{"- 获取函数已自动设置: qUCB（优化初期，优先探索）" if auto_acq else "- 获取函数建议: qUCB（如需，可在配置中设置）"}
 
 🎯 **下一步建议**:
 - 再进行 2-3 轮实验以建立有效的代理模型
@@ -3079,21 +3103,40 @@ def check_convergence(tool_context: ToolContext) -> str:
                         report_parts.append(f"  • 最近改进率: {recent_rate:.2%}")
                     report_parts.append("")
                 
-                # 建议
+                # 建议 + 自动采集函数选择
+                auto_acq = None
+                auto_reason = ""
                 if is_converging or (improvement_rate < 0.02 and confidence > 0.5):
+                    auto_acq = _maybe_auto_select_acquisition_function(
+                        state, recommended="qEI", reason="接近收敛，偏向利用"
+                    )
+                    auto_reason = "接近收敛，偏向利用"
                     report_parts.append("🛑 **建议**: 考虑停止优化")
                     report_parts.append("- 改进速度已明显放缓或达到平台期")
                     report_parts.append("- 可以使用当前最优参数进行生产验证")
                     report_parts.append("")
                     report_parts.append("📊 **下一步**: 建议运行Fitting Agent进行详细结果分析和可视化")
                 elif improvement_rate < 0.05:
+                    auto_acq = _maybe_auto_select_acquisition_function(
+                        state, recommended="qEI", reason="改进放缓，适度利用"
+                    )
+                    auto_reason = "改进放缓，适度利用"
                     report_parts.append("⚠️ **建议**: 接近收敛，可考虑再优化1-2轮")
                     report_parts.append("- 改进速度已放缓")
                     report_parts.append("- 建议进行最后1-2轮精细优化")
                 else:
+                    auto_acq = _maybe_auto_select_acquisition_function(
+                        state, recommended="qUCB", reason="仍有改进空间，优先探索"
+                    )
+                    auto_reason = "仍有改进空间，优先探索"
                     report_parts.append("🚀 **建议**: 继续优化")
                     report_parts.append("- 仍有显著改进空间")
                     report_parts.append(f"- 建议再进行2-3轮实验（当前改进率: {improvement_rate:.2%}）")
+                report_parts.append("")
+                if auto_acq:
+                    report_parts.append(f"🎯 **获取函数已自动设置**: {auto_acq}（{auto_reason}）")
+                else:
+                    report_parts.append("🎯 **获取函数建议**: 维持当前设置（如需可手动调整）")
                 
                 return "\n".join(report_parts)
                 
@@ -3115,12 +3158,16 @@ def check_convergence(tool_context: ToolContext) -> str:
                     recent_improvement = max(recent_improvement, improvement)
         
         if recent_improvement < 0.05:
+            auto_acq = _maybe_auto_select_acquisition_function(
+                state, recommended="qEI", reason="改进放缓，偏向利用"
+            )
             return f"""
 📊 **优化收敛性分析** (轮次 {current_round})
 
 🎯 **收敛状态**: 接近收敛 
 - 最近改进率: {recent_improvement:.3f}
 - 总实验数: {len(measurements)}
+{"- 获取函数已自动设置: qEI（改进放缓，偏向利用）" if auto_acq else "- 获取函数建议: qEI（如需，可在配置中设置）"}
 
 🛑 **建议**: 考虑停止优化
 - 改进速度已明显放缓
@@ -3129,12 +3176,16 @@ def check_convergence(tool_context: ToolContext) -> str:
 📊 **最终分析**: 建议运行Fitting Agent进行详细结果分析
             """
         else:
+            auto_acq = _maybe_auto_select_acquisition_function(
+                state, recommended="qUCB", reason="仍有改进空间，优先探索"
+            )
             return f"""
 📊 **优化收敛性分析** (轮次 {current_round})
 
 ▶️ **收敛状态**: 仍在改进中
 - 最近改进率: {recent_improvement:.3f}
 - 总实验数: {len(measurements)}
+{"- 获取函数已自动设置: qUCB（仍有改进空间，优先探索）" if auto_acq else "- 获取函数建议: qUCB（如需，可在配置中设置）"}
 
 🚀 **建议**: 继续优化
 - 仍有显著改进空间
