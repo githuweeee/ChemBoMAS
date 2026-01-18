@@ -44,10 +44,12 @@ experiment_log_*.csv
 result_template_*.csv
 optimization_report_*.txt
 optimization_trajectory_*.png
+target_distributions_*.png
 
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
@@ -73,3 +75,29 @@ benchmark.csv
 example3_spacecorrected*.csv
 MDresults.xlsx
 # Keep essential examples: example2.csv, initial_data.csv
+
+# Documentation and non-essential files (for release)
+docs/
+agent/
+ExampleAgent/
+edbo/
+examples/
+paper/
+*.drawio
+~$*.xlsx
+untitled.*
+
+# Test files
+test_*.py
+tests/
+
+# Migration and refactoring docs
+PYTHON311_*.md
+Agent_*.md
+
+# Node.js (not used)
+package-lock.json
+node_modules/
+
+# Merged into README.md
+项目描述_中英文.md

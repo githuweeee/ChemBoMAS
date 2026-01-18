@@ -159,7 +159,29 @@ def _format_recommendations_like_original(
     """
     original_format = state.get("original_data_format", {})
     original_column_order = original_format.get("column_order", [])
-    
+
+    if not original_column_order:
+        # 回退1：使用已存在的 experiment_log.csv 列顺序
+        unified_log = state.get("unified_experiment_log_path")
+        if unified_log and os.path.exists(unified_log):
+            try:
+                existing_log = _read_csv_clean(unified_log)
+                original_column_order = list(existing_log.columns)
+                print(f"[WARN] No original_data_format; fallback to experiment_log columns ({len(original_column_order)})")
+            except Exception as exc:
+                print(f"[WARN] Failed to read experiment_log for column order: {exc}")
+
+    if not original_column_order:
+        # 回退2：使用标准化数据列顺序
+        standardized_path = state.get("verification_results", {}).get("standardized_data_path")
+        if standardized_path and os.path.exists(standardized_path):
+            try:
+                standardized_df = _read_csv_clean(standardized_path)
+                original_column_order = list(standardized_df.columns)
+                print(f"[WARN] No original_data_format; fallback to standardized_data columns ({len(original_column_order)})")
+            except Exception as exc:
+                print(f"[WARN] Failed to read standardized_data for column order: {exc}")
+
     if not original_column_order:
         # 如果没有原始格式信息，使用默认格式
         print("[WARN] No original data format found, using default format")

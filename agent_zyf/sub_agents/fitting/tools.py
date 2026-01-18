@@ -20,9 +20,14 @@ import json
 import matplotlib
 matplotlib.use('Agg')  # 使用非交互式后端
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import seaborn as sns
 from datetime import datetime
 from google.adk.tools import ToolContext
+
+# 配置 matplotlib 中文字体支持
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 # BayBE和机器学习导入
 try:
@@ -38,21 +43,126 @@ except ImportError as e:
     ML_AVAILABLE = False
 
 
+def _load_experiment_log_measurements(state: dict, recommender_tools, campaign) -> pd.DataFrame:
+    """从 experiment_log.csv 提取可用测量数据（仅参数列 + 目标列）"""
+    unified_log = state.get("unified_experiment_log_path")
+    if not unified_log:
+        session_dir = state.get("session_dir", ".")
+        candidate = os.path.join(session_dir, "experiment_log.csv")
+        unified_log = candidate if os.path.exists(candidate) else None
+
+    if not unified_log or not os.path.exists(unified_log):
+        return pd.DataFrame()
+
+    try:
+        df = recommender_tools._read_csv_clean(unified_log)
+    except Exception:
+        df = pd.read_csv(unified_log)
+
+    # 目标列
+    target_cols = []
+    try:
+        target_cols = [t.name for t in campaign.objective.targets if hasattr(t, "name")]
+    except Exception:
+        target_cols = []
+    if not target_cols:
+        target_cols = [c for c in df.columns if c.startswith("Target_")]
+
+    if not target_cols:
+        return pd.DataFrame()
+
+    # 处理占位符与类型转换
+    for col in target_cols:
+        if col in df.columns:
+            df[col] = df[col].replace(r"^<.*>$", np.nan, regex=True)
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 仅保留目标值完整的行
+    df = df[df[target_cols].notna().all(axis=1)].copy()
+    if df.empty:
+        return df
+
+    # 参数列
+    param_cols = []
+    try:
+        param_cols = list(campaign.searchspace.parameter_names)
+    except Exception:
+        param_cols = []
+
+    required_cols = [c for c in param_cols + target_cols if c in df.columns]
+    if not required_cols:
+        return pd.DataFrame()
+
+    return df[required_cols]
+
+
+def _rebuild_campaign_from_state(state: dict, recommender_tools):
+    """当缓存缺失时，尝试根据state重建Campaign并回填测量数据"""
+    verification_results = state.get("verification_results", {})
+    baybe_campaign_config = state.get("baybe_campaign_config", {})
+    optimization_config = state.get("optimization_config", {})
+
+    if not verification_results or not optimization_config:
+        return None
+
+    campaign_result = recommender_tools._build_baybe_campaign(
+        verification_results,
+        baybe_campaign_config,
+        optimization_config
+    )
+    if not campaign_result.get("success"):
+        return None
+
+    campaign = campaign_result.get("campaign")
+    if campaign is None:
+        return None
+
+    measurements = _load_experiment_log_measurements(state, recommender_tools, campaign)
+    if measurements is not None and not measurements.empty:
+        try:
+            campaign.add_measurements(measurements)
+        except Exception as exc:
+            print(f"[WARN] 回填测量数据失败: {exc}")
+
+    session_id = state.get("session_id", "unknown")
+    try:
+        recommender_tools._save_campaign_to_cache(session_id, campaign)
+    except Exception:
+        pass
+
+    return campaign
+
+
 def _ensure_campaign_in_state(state: dict):
-    """确保baybe_campaign可用（避免在state中保存不可序列化对象）"""
+    """确保Campaign可用（不写回state，避免序列化失败）"""
     # 如果state中已有Campaign对象，先取出并移除，避免序列化失败
-    campaign = state.pop("baybe_campaign", None)
+    campaign = state.get("baybe_campaign")
+    if campaign is not None:
+        # ADK State 可能不支持 pop，尽量安全移除
+        try:
+            state.pop("baybe_campaign", None)
+        except Exception:
+            try:
+                del state["baybe_campaign"]
+            except Exception:
+                try:
+                    state["baybe_campaign"] = None
+                except Exception:
+                    pass
     if campaign is not None:
         return campaign
 
     session_id = state.get("session_id", "unknown")
     try:
         from ..recommender import tools as recommender_tools
-        campaign = recommender_tools._get_campaign_from_cache(session_id)
     except Exception:
-        campaign = None
+        return None
 
-    return campaign
+    campaign = recommender_tools._get_campaign_from_cache(session_id)
+    if campaign is not None:
+        return campaign
+
+    return _rebuild_campaign_from_state(state, recommender_tools)
 
 
 def analyze_campaign_performance(tool_context: ToolContext) -> str:

@@ -28,7 +28,10 @@ def check_prerequisites(callback_context: CallbackContext) -> None:
     # 尝试从缓存恢复campaign（避免state未保存对象导致的误报）
     campaign = tools._ensure_campaign_in_state(callback_context.state)
     if campaign is None:
-        raise ValueError("Fitting Agent前提条件不满足，缺少: baybe_campaign")
+        raise ValueError(
+            "Fitting Agent前提条件不满足：未找到Campaign缓存，且无法从实验记录重建。\n"
+            "请先完成一次推荐/上传结果，确保存在 experiment_log.csv。"
+        )
     
     # 检查是否有足够的实验数据进行分析
     if campaign and hasattr(campaign, 'measurements'):
