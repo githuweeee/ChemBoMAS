@@ -330,7 +330,7 @@ except Exception as e:
     
     # 根据健康检查结果决定下一步
     if "Campaign对象存在: False" in health:
-        print("需要先运行 SearchSpace Construction Agent")
+        print("需要先运行 build_campaign_and_recommend 构建 Campaign")
 ```
 
 ---

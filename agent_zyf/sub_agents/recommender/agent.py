@@ -14,8 +14,8 @@
 """The Unified Recommender Agent for the ChemBoMAS system.
 
 This agent combines the functionality of:
-- SearchSpace Construction Agent (Campaign building)
-- Recommender Agent (Experiment recommendation)
+- Campaign building (integrated)
+- Experiment recommendation
 
 Simplified architecture: Enhanced Verification → Recommender → Fitting
 """

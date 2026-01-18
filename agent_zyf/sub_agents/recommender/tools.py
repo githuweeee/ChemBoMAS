@@ -13,8 +13,8 @@
 
 """Recommender Agent Tools - BayBE Campaign构建、贝叶斯优化推荐和迭代管理
 
-合并了原SearchSpace Construction Agent的功能，实现完整的优化工作流：
-1. Campaign构建 (原SearchSpace Construction Agent)
+包含 Campaign 构建功能，实现完整的优化工作流：
+1. Campaign构建（与推荐流程整合）
 2. 实验推荐生成
 3. 实验结果处理
 4. 迭代优化管理
@@ -54,6 +54,7 @@ try:
         ContinuousLinearConstraint
     )
     from baybe.constraints.conditions import ThresholdCondition
+    from baybe.recommenders import BotorchRecommender
     from baybe.utils.dataframe import add_fake_measurements
     BAYBE_AVAILABLE = True
 except ImportError:
@@ -91,6 +92,20 @@ def _is_valid_smiles_format(smiles: str) -> bool:
                 return False  # 括号不匹配
     
     return len(stack) == 0  # 所有括号都应该匹配
+
+
+def _build_baybe_recommender(optimization_config: dict):
+    """根据 acquisition_function 构建推荐器（如未指定则返回 None）"""
+    if not BAYBE_AVAILABLE:
+        return None
+    acquisition_function = optimization_config.get("acquisition_function", "default")
+    if not acquisition_function or acquisition_function == "default":
+        return None
+    try:
+        return BotorchRecommender(acquisition_function=acquisition_function)
+    except Exception as exc:
+        print(f"[WARN] 无法创建推荐器 (acquisition_function={acquisition_function}): {exc}")
+        return None
 
 
 def _read_csv_clean(path: str) -> pd.DataFrame:
@@ -454,14 +469,14 @@ def _add_name_columns(df: pd.DataFrame, smiles_map: dict) -> pd.DataFrame:
 
 
 # =============================================================================
-# Campaign构建工具 (合并自SearchSpace Construction Agent)
+# Campaign构建工具（与推荐流程整合）
 # =============================================================================
 
 def build_campaign_and_recommend(batch_size: str, tool_context: ToolContext) -> str:
     """
     一体化工具：构建BayBE Campaign并立即生成第一批实验推荐
     
-    这个工具合并了原来SearchSpace Construction Agent和Recommender Agent的第一步功能。
+    这个工具整合了 Campaign 构建与首轮推荐的流程。
     
     Args:
         batch_size: 推荐的实验数量（默认5）
@@ -595,11 +610,19 @@ def _build_baybe_campaign(verification_results: dict,
         # 6. 创建目标函数
         objective = _create_baybe_objective(targets, optimization_config)
         
-        # 7. 创建Campaign
-        campaign = Campaign(
-            searchspace=searchspace,
-            objective=objective
-        )
+        # 7. 创建Campaign（可选指定获取函数）
+        recommender = _build_baybe_recommender(optimization_config)
+        if recommender:
+            campaign = Campaign(
+                searchspace=searchspace,
+                objective=objective,
+                recommender=recommender
+            )
+        else:
+            campaign = Campaign(
+                searchspace=searchspace,
+                objective=objective
+            )
         
         # 8. 准备返回信息
         # 注意：SubspaceDiscrete 不支持 len()，需要用 exp_rep 获取大小
@@ -1166,10 +1189,11 @@ def _create_baybe_constraints(df: pd.DataFrame, optimization_config: dict) -> li
     
     print(f"[DEBUG] Creating constraints, user-defined constraints: {len(constraints_config)}")
     
-    # 1. 自动检测比例约束
+    # 1. 自动检测比例约束（可通过开关关闭）
+    auto_ratio_sum_constraint = optimization_config.get("auto_ratio_sum_constraint", True)
     ratio_columns = [col for col in df.columns if 'ratio' in col.lower()]
     
-    if len(ratio_columns) > 1:
+    if auto_ratio_sum_constraint and len(ratio_columns) > 1:
         # 检查比例是否应该和为1
         ratio_sum = df[ratio_columns].sum(axis=1)
         if np.allclose(ratio_sum, 1.0, atol=0.1):
@@ -1441,7 +1465,18 @@ def _generate_recommendations_internal(campaign: Campaign, batch_size: int, stat
     """
     内部推荐生成函数
     """
-    # 生成推荐
+    # 生成推荐（可选：使用用户偏好的获取函数）
+    optimization_config = state.get("optimization_config", {})
+    recommender = _build_baybe_recommender(optimization_config)
+    if recommender:
+        current_recommender = getattr(campaign, "recommender", None)
+        current_acq = getattr(current_recommender, "acquisition_function", None) if current_recommender else None
+        if current_recommender is None or current_acq != optimization_config.get("acquisition_function"):
+            try:
+                campaign.recommender = recommender
+                print(f"[DEBUG] 使用获取函数 {optimization_config.get('acquisition_function')} 配置推荐器")
+            except Exception as e:
+                print(f"[WARN] 无法设置推荐器，回退默认推荐: {e}")
     recommendations = campaign.recommend(batch_size=batch_size)
     
     # 验证推荐值是否满足约束
@@ -3368,395 +3403,3 @@ def check_agent_health(tool_context: ToolContext) -> str:
 
 {'🔧 **建议**: 系统运行正常，可以继续优化' if system_status == '🟢 系统正常' else '⚠️ **建议**: 使用 build_campaign_and_recommend 工具初始化系统'}
     """
-
-
-# =============================================================================
-# 代码执行工具 - 允许LLM直接生成Python代码调用BayBE
-# =============================================================================
-
-def execute_baybe_code(
-    python_code: str,
-    tool_context: ToolContext
-) -> str:
-    """
-    执行LLM生成的Python代码来直接调用BayBE
-    
-    这个工具提供了更灵活的方式来操作BayBE，允许LLM根据具体需求生成自定义代码。
-    适用于：
-    - 复杂的Campaign构建逻辑
-    - 自定义的推荐策略
-    - 特殊的数据处理需求
-    - 实验性的优化方法
-    
-    Args:
-        python_code: LLM生成的Python代码字符串
-        tool_context: ADK工具上下文
-        
-    Returns:
-        str: 代码执行结果或错误信息
-        
-    Available Variables in Execution Context:
-    - campaign: 当前session的BayBE Campaign对象（如果存在）
-    - state: 当前session的状态字典
-    - session_id: 当前session ID
-    - verification_results: Enhanced Verification的结果（包含SMILES验证、参数建议等）
-    - optimization_config: 优化配置（目标、约束、batch_size等）
-    - baybe_campaign_config: BayBE Campaign配置
-    - standardized_data_path: 标准化数据文件路径
-    - current_data_path: 当前数据文件路径
-    - session_dir: Session目录路径
-    - pd: pandas模块
-    - np: numpy模块
-    - json: json模块
-    - os: os模块
-    - tempfile: tempfile模块
-    - datetime: datetime模块
-    
-    Available BayBE Imports:
-    - Campaign
-    - CategoricalParameter, NumericalContinuousParameter, NumericalDiscreteParameter
-    - SearchSpace
-    - NumericalTarget
-    - DesirabilityObjective, ParetoObjective
-    - DiscreteSumConstraint, ContinuousLinearConstraint
-    - ThresholdCondition
-    - BotorchRecommender, RandomRecommender, FPSRecommender (如果可用)
-    
-    Example Usage:
-    ```python
-    # 创建自定义参数
-    from baybe.parameters import NumericalContinuousParameter
-    param = NumericalContinuousParameter(name="temperature", bounds=(0, 100))
-    
-    # 获取推荐
-    if campaign:
-        recommendations = campaign.recommend(batch_size=5)
-        print(f"Generated {len(recommendations)} recommendations")
-    ```
-    """
-    if not BAYBE_AVAILABLE:
-        return "❌ BayBE未安装，无法执行代码。请运行: pip install 'baybe[chem]'"
-    
-    state = tool_context.state
-    session_id = state.get("session_id", "unknown")
-    
-    # 获取当前Campaign（如果存在）
-    campaign = _get_campaign_from_cache(session_id)
-
-    # 强制约束：首次构建必须使用标准工具
-    if campaign is None:
-        return (
-            "⚠️ 为避免反复失败，首次构建 Campaign 请使用标准工具 `build_campaign_and_recommend`。\n"
-            "如需自定义逻辑，请先用标准工具初始化 Campaign，再使用 `execute_baybe_code` 进行扩展。"
-        )
-    
-    # 提取state中的关键信息，方便代码访问
-    verification_results = state.get("verification_results", {})
-    optimization_config = state.get("optimization_config", {})
-    baybe_campaign_config = state.get("baybe_campaign_config", {})
-    standardized_data_path = verification_results.get("standardized_data_path") or state.get("standardized_data_path")
-    current_data_path = state.get("current_data_path")
-    session_dir = state.get("session_dir", ".")
-    
-    # 尝试导入更多BayBE推荐器（如果可用）
-    baybe_recommenders = {}
-    try:
-        from baybe.recommenders import BotorchRecommender, RandomRecommender, FPSRecommender
-        baybe_recommenders['BotorchRecommender'] = BotorchRecommender
-        baybe_recommenders['RandomRecommender'] = RandomRecommender
-        baybe_recommenders['FPSRecommender'] = FPSRecommender
-    except ImportError:
-        pass
-    
-    # 准备执行环境
-    exec_globals = {
-        # BayBE相关
-        'Campaign': Campaign,
-        'CategoricalParameter': CategoricalParameter,
-        'NumericalContinuousParameter': NumericalContinuousParameter,
-        'NumericalDiscreteParameter': NumericalDiscreteParameter,
-        'SearchSpace': SearchSpace,
-        'NumericalTarget': NumericalTarget,
-        'DesirabilityObjective': DesirabilityObjective,
-        'ParetoObjective': ParetoObjective,
-        'DiscreteSumConstraint': DiscreteSumConstraint,
-        'ContinuousLinearConstraint': ContinuousLinearConstraint,
-        'ThresholdCondition': ThresholdCondition,
-        'add_fake_measurements': add_fake_measurements,
-        
-        # BayBE推荐器（如果可用）
-        **baybe_recommenders,
-        
-        # 标准库
-        'pd': pd,
-        'np': np,
-        'json': json,
-        'os': os,
-        'tempfile': tempfile,
-        'datetime': datetime,
-        
-        # 上下文变量
-        'campaign': campaign,
-        'state': state,
-        'session_id': session_id,
-        'verification_results': verification_results,
-        'optimization_config': optimization_config,
-        'baybe_campaign_config': baybe_campaign_config,
-        'standardized_data_path': standardized_data_path,
-        'current_data_path': current_data_path,
-        'session_dir': session_dir,
-        
-        # 辅助函数
-        '_get_campaign_from_cache': _get_campaign_from_cache,
-        '_save_campaign_to_cache': _save_campaign_to_cache,
-        '_read_csv_clean': _read_csv_clean,
-    }
-    
-    exec_locals = {}
-    
-    # 代码预处理：清理/修正已知不兼容或多余的导入语句
-    def _preprocess_user_code(code: str) -> str:
-        """
-        在执行前，对LLM生成的代码做一次轻量级清洗：
-        
-        1. 删除/替换已知错误或过时的BayBE导入：
-           - from baybe.objective import ...
-           - from baybe.objectives import DesirabilityObjective, ParetoObjective 等
-           - from baybe.constraints import SumConstraint, LinearInequalityConstraint 等
-        2. 避免重复导入已经在执行环境中提供的类。
-        
-        注意：
-        - 只做极小范围、模式化的替换，不修改用户的业务逻辑。
-        - 如果有无法识别的导入，保持原样，交由正常异常处理。
-        """
-        import re
-        
-        lines = code.splitlines()
-        cleaned_lines = []
-        
-        # 一些需要完全移除的导入（在当前环境中无效或多余）
-        removal_patterns = [
-            r'^\s*from\s+baybe\.objective\s+import\s+.*$',              # 不存在的模块
-        ]
-        
-        # 针对 objectives / constraints 的安全替换或删除
-        def should_drop_or_rewrite_import(line: str) -> str | None:
-            stripped = line.strip()
-            
-            # 1) 任何从 baybe.objective 导入的，直接删除
-            if stripped.startswith("from baybe.objective import"):
-                return ""  # 删除
-            
-            # 2) 从 baybe.objectives 导入 DesirabilityObjective / ParetoObjective
-            #    这些类已在 exec_globals 中提供，可以安全删除这一行
-            if stripped.startswith("from baybe.objectives import"):
-                # 如果只导入 DesirabilityObjective / ParetoObjective，则整行删除
-                if all(name in stripped for name in ["DesirabilityObjective", "ParetoObjective"]):
-                    return ""
-                # 否则保留原行（以防用户导入了其他对象）
-                return line
-            
-            # 3) 从 baybe.constraints 导入已知的“老名字”，尝试删除或提醒
-            if stripped.startswith("from baybe.constraints import"):
-                # 如果行里包含 SumConstraint 或 LinearInequalityConstraint，则删除这些名称
-                # 并保留其他可能有效的导入
-                to_remove = ["SumConstraint", "LinearInequalityConstraint"]
-                # 简单按逗号拆分
-                if any(name in stripped for name in to_remove):
-                    # 提取 import 后面的部分
-                    m = re.match(r"^\s*from\s+baybe\.constraints\s+import\s+(.*)$", stripped)
-                    if m:
-                        imported = m.group(1)
-                        # 拆分名称并过滤
-                        names = [n.strip() for n in imported.split(",")]
-                        names = [n for n in names if n not in to_remove]
-                        # 如果没有剩余名称，就整行删除
-                        if not names:
-                            return ""
-                        # 否则重写为只导入剩余名称
-                        return f"from baybe.constraints import {', '.join(names)}"
-                return line
-            
-            return line
-        
-        for line in lines:
-            # 先处理需要特殊判断的导入行
-            if line.strip().startswith("from baybe."):
-                new_line = should_drop_or_rewrite_import(line)
-                if new_line is None:
-                    cleaned_lines.append(line)
-                elif new_line == "":
-                    # 这一行被安全删除
-                    continue
-                else:
-                    cleaned_lines.append(new_line)
-                continue
-            
-            # 处理需要整体删除的模式
-            drop = False
-            for pat in removal_patterns:
-                if re.match(pat, line):
-                    drop = True
-                    break
-            if drop:
-                continue
-            
-            cleaned_lines.append(line)
-        
-        cleaned_code = "\n".join(cleaned_lines)
-        if cleaned_code != code:
-            print("[DEBUG] execute_baybe_code: 用户代码在执行前已做轻量级清洗（移除/修正不兼容的BayBE导入）")
-        return cleaned_code
-    
-    # 在安全检查与执行前，先对代码做一次预处理
-    python_code = _preprocess_user_code(python_code)
-    
-    # 安全检查：禁止危险操作
-    dangerous_patterns = [
-        '__import__',
-        'eval(',
-        'exec(',
-        'compile(',
-        'open(',
-        'file(',
-        'input(',
-        'raw_input(',
-        'exit(',
-        'quit(',
-        'sys.exit',
-        'subprocess',
-        'os.system',
-        'os.popen',
-        'shutil',
-        'pickle.loads',
-        'marshal.loads',
-    ]
-    
-    code_lower = python_code.lower()
-    for pattern in dangerous_patterns:
-        if pattern in code_lower:
-            return f"❌ 安全检查失败：代码包含禁止的操作 '{pattern}'。\n\n请只使用BayBE相关的操作。"
-    
-    # 执行代码
-    try:
-        # 捕获标准输出
-        import io
-        import sys
-        import signal
-        from contextlib import redirect_stdout, redirect_stderr
-        
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-        
-        # 执行时间限制（30秒）
-        def timeout_handler(signum, frame):
-            raise TimeoutError("代码执行超时（30秒限制）")
-        
-        # 设置超时（仅Unix系统）
-        if hasattr(signal, 'SIGALRM'):
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(30)
-        
-        try:
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                exec(python_code, exec_globals, exec_locals)
-        finally:
-            # 取消超时
-            if hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)
-        
-        stdout_output = stdout_capture.getvalue()
-        stderr_output = stderr_capture.getvalue()
-        
-        # 检查是否有Campaign被修改或创建
-        new_campaign = exec_locals.get('campaign') or exec_globals.get('campaign')
-        if new_campaign and new_campaign != campaign:
-            _save_campaign_to_cache(session_id, new_campaign)
-            print(f"[DEBUG] Campaign已更新并保存到缓存")
-        
-        # 检查state是否被修改（同步更新）
-        if exec_globals.get('state') != state:
-            # state可能被修改，但exec_globals中的state引用应该已经更新
-            # 这里主要是记录，实际state是引用传递，会自动更新
-            print(f"[DEBUG] State可能已被代码修改")
-        
-        # 构建返回结果
-        result_parts = []
-        
-        if stdout_output:
-            result_parts.append(f"📝 **标准输出**:\n```\n{stdout_output}\n```")
-        
-        if stderr_output:
-            result_parts.append(f"⚠️ **错误输出**:\n```\n{stderr_output}\n```")
-        
-        # 检查是否有返回值
-        if 'result' in exec_locals:
-            result_value = exec_locals['result']
-            if result_value is not None:
-                if isinstance(result_value, pd.DataFrame):
-                    result_parts.append(f"📊 **返回DataFrame**:\n{result_value.to_string()}")
-                elif isinstance(result_value, (dict, list)):
-                    result_parts.append(f"📋 **返回数据**:\n{json.dumps(result_value, indent=2, ensure_ascii=False)}")
-                else:
-                    result_parts.append(f"✅ **返回值**: {result_value}")
-        
-        if not result_parts:
-            result_parts.append("✅ **代码执行成功**（无输出）")
-        
-        return "\n\n".join(result_parts)
-        
-    except TimeoutError as e:
-        return f"""⏱️ **代码执行超时**
-
-代码执行时间超过30秒限制，已被终止。
-
-💡 **建议**:
-1. 将复杂操作拆分为多个步骤
-2. 减少数据处理量
-3. 优化代码性能
-4. 使用标准工具处理大数据集
-"""
-    except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        
-        # 提供更具体的错误修复建议
-        error_suggestions = []
-        error_msg = str(e).lower()
-        
-        if 'name' in error_msg and 'not defined' in error_msg:
-            error_suggestions.append("• 检查变量名拼写是否正确")
-            error_suggestions.append("• 确认已导入所需的BayBE模块")
-            error_suggestions.append("• 查看可用变量列表：campaign, state, pd, np等")
-        elif 'attribute' in error_msg or 'has no attribute' in error_msg:
-            error_suggestions.append("• 检查对象类型是否正确")
-            error_suggestions.append("• 确认Campaign对象已正确初始化")
-            error_suggestions.append("• 查看BayBE文档确认API用法")
-        elif 'type' in error_msg or 'typeerror' in error_msg:
-            error_suggestions.append("• 检查参数类型是否匹配")
-            error_suggestions.append("• 确认数值参数是数字类型")
-            error_suggestions.append("• 检查DataFrame列名是否正确")
-        elif 'value' in error_msg or 'valueerror' in error_msg:
-            error_suggestions.append("• 检查参数值是否在有效范围内")
-            error_suggestions.append("• 确认数据格式正确")
-            error_suggestions.append("• 验证约束条件是否合理")
-        
-        suggestions_text = "\n".join(error_suggestions) if error_suggestions else "• 查看上面的错误堆栈定位问题"
-        
-        return f"""❌ **代码执行失败**
-
-**错误类型**: {type(e).__name__}
-**错误信息**: {str(e)}
-
-**详细堆栈**:
-```
-{error_traceback}
-```
-
-💡 **调试建议**:
-1. 检查代码语法是否正确
-2. 确认所有变量都已定义
-3. 验证BayBE对象的使用是否正确
-{suggestions_text}
-4. 参考CODE_EXECUTION_GUIDE.md中的示例代码
-"""

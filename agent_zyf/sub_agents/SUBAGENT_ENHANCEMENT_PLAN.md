@@ -25,7 +25,7 @@ class TestCompleteWorkflow:
     def test_full_optimization_cycle(self):
         """测试完整的优化循环"""
         # 1. Enhanced Verification
-        # 2. SearchSpace Construction
+        # 2. Campaign Construction (in Recommender)
         # 3. Initial Recommendations
         # 4. Result Upload (模拟)
         # 5. Next Recommendations

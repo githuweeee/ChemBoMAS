@@ -4,18 +4,17 @@
 
 ### ✅ 已完成的核心组件
 
-您的ChemBoMAS项目已经建立了一个**功能完整的4智能体架构**，基于BayBE和Google ADK，具有以下优势：
+您的ChemBoMAS项目已经建立了一个**功能完整的3智能体架构**，基于BayBE和Google ADK，具有以下优势：
 
 #### 1. **先进的架构设计**
-- ✨ 4个专业化Subagent（Enhanced Verification → SearchSpace Construction → Recommender → Fitting）
+- ✨ 3个专业化Subagent（Enhanced Verification → Recommender → Fitting）
 - 🎯 BayBE自动描述符处理（完全避免手动特征工程）
 - 🔄 完整的实验闭环工作流
 - 📝 2180行详细开发文档
 
 #### 2. **核心功能实现**
 - ✅ Enhanced Verification Agent（7个核心任务）
-- ✅ SearchSpace Construction Agent（BayBE Campaign构建）
-- ✅ Recommender Agent（实验推荐和迭代管理）
+- ✅ Recommender Agent（Campaign构建 + 实验推荐 + 迭代管理）
 - ✅ Fitting Agent（模型分析和可视化）
 
 #### 3. **新增增强功能**
@@ -79,15 +78,15 @@ class TestVerificationTools(unittest.TestCase):
         pass
 ```
 
-创建 `tests/test_searchspace_tools.py`:
+创建 `tests/test_recommender_tools.py`:
 ```python
 import unittest
-from agent_zyf.sub_agents.searchspace_construction.tools import (
-    construct_searchspace_and_campaign,
-    validate_campaign_readiness
+from agent_zyf.sub_agents.recommender.tools import (
+    build_campaign_and_recommend,
+    generate_recommendations
 )
 
-class TestSearchspaceTools(unittest.TestCase):
+class TestRecommenderTools(unittest.TestCase):
     def test_parameter_creation(self):
         """测试BayBE参数创建"""
         pass
@@ -100,12 +99,12 @@ class TestSearchspaceTools(unittest.TestCase):
 #### 任务1.3: 错误处理增强
 为每个Agent添加robust的错误处理：
 
-**示例：增强SearchSpace Construction Agent的错误处理**
+**示例：增强Recommender Agent的错误处理**
 ```python
-# 在 sub_agents/searchspace_construction/tools.py 中
+# 在 sub_agents/recommender/tools.py 中
 
-def construct_searchspace_and_campaign(user_constraints: str, tool_context: ToolContext) -> str:
-    """构建BayBE搜索空间和Campaign"""
+def build_campaign_and_recommend(batch_size: str, tool_context: ToolContext) -> str:
+    """构建BayBE Campaign并生成首批推荐"""
     state = tool_context.state
     
     try:
@@ -598,7 +597,7 @@ except Exception as e:
 A: 检查SMILES验证结果，确保至少有2个有效SMILES值
 
 **Q: 推荐生成没有结果**
-A: 确认SearchSpace Construction Agent已成功完成
+A: 确认 Recommender Agent 已成功构建 Campaign
 
 **Q: 可视化不显示**
 A: 检查matplotlib后端设置，确保使用'Agg'

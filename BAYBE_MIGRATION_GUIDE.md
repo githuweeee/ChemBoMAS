@@ -1,5 +1,7 @@
 # BayBE 迁移实施指南
 
+> 说明：本指南用于历史迁移参考，当前项目运行不依赖 torch/botorch/gpytorch（由 BayBE 自身管理）。
+
 ## 概述
 本文档为从 EDBO+ 迁移到 BayBE 提供详细的技术指南和实施路线图。
 

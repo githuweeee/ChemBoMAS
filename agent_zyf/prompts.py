@@ -218,6 +218,7 @@ Tool call:
 | "总共200次" | total_budget | 200 |
 | "接受建议的参数" | accept_suggested_parameters | true |
 | "没有约束" | constraints | "[]" |
+| "关闭自动比例约束" | auto_ratio_sum_constraint | false |
 
 4. **Completion**: After collecting optimization goals:
    - Output the verification summary

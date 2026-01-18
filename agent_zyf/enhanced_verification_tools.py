@@ -44,6 +44,20 @@ def _detect_suspicious_headers(df: pd.DataFrame) -> list:
             continue
     return suspicious
 
+
+def _reset_verification_state(state: dict, reason: str) -> None:
+    """清理验证相关状态，避免污染后续流程"""
+    for key in [
+        "verification_results",
+        "baybe_campaign_config",
+        "optimization_config",
+        "ready_for_optimization",
+        "searchspace_info",
+        "campaign_built",
+    ]:
+        state.pop(key, None)
+    state["verification_status"] = f"failed:{reason}"
+
 # 导入化学知识库
 from .chemistry_knowledge_base import ChemistryKnowledgeBase
 
@@ -928,7 +942,7 @@ class UserDefinedEncodingHandler:
         为用户定义的特殊物质创建BayBE参数配置（可序列化的配置，非实际对象）
         
         注意：此函数返回的是参数配置信息（可JSON序列化），
-        而不是实际的BayBE Parameter对象。实际对象应在SearchSpace Construction Agent中创建。
+        而不是实际的BayBE Parameter对象。实际对象应在 Recommender Agent 中创建。
         """
         parameter_configs = []
         
@@ -1413,6 +1427,10 @@ def enhanced_verification(file_path: str, tool_context: ToolContext) -> str:
         suspicious_headers = _detect_suspicious_headers(df)
         if suspicious_headers:
             suspicious_preview = "\n".join([f"- {h}" for h in suspicious_headers[:5]])
+            _reset_verification_state(state, "header_contamination")
+            state.pop("smiles_to_name_map", None)
+            state.pop("original_data_format", None)
+            state.pop("standardized_data_path", None)
             return (
                 "数据表头疑似被说明文字污染，导致列错位/类型错误。\n"
                 "检测到以下可疑列名：\n"
@@ -1875,7 +1893,11 @@ def _generate_user_interaction_prompt(interaction_data: dict) -> str:
    - 可选项示例: `qEI`, `qUCB`, `qNEI`, `qPI`
    - 如不确定可回答 “默认”
 
-6. **实验设计参数**:
+6. **比例和为1的自动约束（可选）**:
+   - 是否启用自动“比例之和 = 1.0”的约束
+   - 默认启用；如不需要可回答“关闭”
+
+7. **实验设计参数**:
    - 计划的实验批次大小 (batch_size)
    - 最大实验轮数 (max_iterations)
    - 预算约束 (总实验数量限制)
@@ -1900,7 +1922,8 @@ def collect_optimization_goals(
     optimization_strategy: str = "desirability",
     constraints: str = "[]",
     custom_parameter_bounds: str = "{}",
-    acquisition_function: str = "default"
+    acquisition_function: str = "default",
+    auto_ratio_sum_constraint: bool = True
 ) -> str:
     """
     收集用户的优化目标和配置（任务5和6）
@@ -1963,6 +1986,8 @@ def collect_optimization_goals(
         acquisition_function: 获取函数偏好，可选值:
             - "default" (使用 BayBE 默认策略)
             - "qEI" / "qUCB" / "qNEI" / "qPI"
+
+        auto_ratio_sum_constraint: 是否启用自动“比例之和=1.0”约束（默认 True）
         
         tool_context: ADK工具上下文
     
@@ -2052,7 +2077,8 @@ def collect_optimization_goals(
             },
             "accept_suggested_parameters": accept_suggested_parameters,
             "custom_parameter_bounds": custom_bounds,
-            "acquisition_function": acquisition_function
+            "acquisition_function": acquisition_function,
+            "auto_ratio_sum_constraint": auto_ratio_sum_constraint
         }
         
         # 生成BayBE兼容的配置
@@ -2062,7 +2088,7 @@ def collect_optimization_goals(
         state["optimization_config"] = optimization_config
         state["baybe_campaign_config"] = baybe_config
         state["verification_status"] = "completed_with_user_input"
-        state["ready_for_searchspace_construction"] = True
+        state["ready_for_optimization"] = True
         
         # 构建详细的目标信息显示（根据策略不同显示不同内容）
         if optimization_strategy == "desirability":
@@ -2126,7 +2152,7 @@ def collect_optimization_goals(
 
 🚀 **下一步**: 系统将构建BayBE搜索空间并准备优化Campaign。
 
-📄 **BayBE配置已保存到会话状态**，可以传递给SearchSpace Construction Agent。
+📄 **BayBE配置已保存到会话状态**，可以传递给 Recommender Agent。
         """
         
     except json.JSONDecodeError as e:
@@ -2204,7 +2230,7 @@ def _generate_baybe_config(optimization_config: dict, verification_results: dict
             "optimization_strategy": optimization_strategy
         },
         "targets": target_configs,
-        "parameters": [],  # 由 SearchSpace Construction Agent 填充
+        "parameters": [],  # 由 Recommender Agent 填充
         "constraints": optimization_config.get("constraints", []),
         "objective_config": objective_config,
         "experimental_config": {

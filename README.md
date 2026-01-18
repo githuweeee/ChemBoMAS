@@ -91,12 +91,13 @@ The agent follows these main steps:
 
 1.  **Data Upload**: The user uploads a CSV file containing chemical reaction data. This includes substance names, their SMILES strings, ratios, and target experimental outcomes (e.g., yield, cost).
 
-2.  **Data Verification**: The system first verifies the uploaded data to ensure it conforms to the required format, checking for correctly named columns for substances and targets.
+2.  **Data Verification**: The system first verifies the uploaded data to ensure it conforms to the required format, checking for correctly named columns for substances and targets. If header rows contain natural-language descriptions, verification will stop and request a clean template.
 
-3.  **Descriptor Generation and SearchSpace Construction**:
-    *   Molecular descriptors are calculated from the SMILES strings for each substance using `rdkit` and `mordred`.
-    *   The system identifies experimental parameters and constructs a BayBE-compatible search space.
-    *   Parameter constraints and bounds are automatically defined based on chemical experiment rules.
+3.  **Parameter Preparation and SearchSpace Construction**:
+    *   Enhanced Verification validates SMILES and extracts adjustable parameters.
+    *   BayBE handles molecular descriptor computation internally in the main workflow (no manual descriptor calculation).
+    *   The system constructs a BayBE-compatible search space and applies constraints/bounds.
+    *   Optional legacy tool `generate_descriptor` still uses `rdkit`/`mordred` for standalone descriptor export.
 
 4.  **Bayesian Optimization and Experiment Recommendation**:
     *   Using the constructed search space, the agent employs BayBE (Bayesian Optimization for Black-box Experiments) to recommend the next batch of experiments.
@@ -128,6 +129,74 @@ To run this agent, you need to install the required Python dependencies.
 - 如需禁用遥测：启动前设置环境变量  
   - PowerShell: `$env:BAYBE_DISABLE_TELEMETRY="1"; adk web`  
   - 或在其他 shell 中 `export BAYBE_DISABLE_TELEMETRY=1` 后再启动。
+
+### 启动配置选项
+
+#### 默认启动（本地访问）
+```bash
+adk web
+# 默认端口: 8000
+# 默认地址: 127.0.0.1 (仅本机访问)
+```
+
+#### 指定端口启动
+```bash
+# 在指定端口启动（仍仅本机访问）
+adk web --port 8080
+
+# PowerShell
+adk web --port 8080
+```
+
+#### 允许外部访问（局域网/远程）
+```bash
+# 绑定所有网络接口，允许外部访问
+adk web --host 0.0.0.0 --port 8080
+
+# PowerShell
+adk web --host 0.0.0.0 --port 8080
+```
+
+#### 完整启动命令示例
+
+**Windows (PowerShell)**:
+```powershell
+# 本地访问，端口 8000（默认）
+adk web
+
+# 本地访问，自定义端口
+adk web --port 8080
+
+# 允许外部访问，自定义端口
+$env:BAYBE_DISABLE_TELEMETRY="1"
+adk web --host 0.0.0.0 --port 8080
+```
+
+**Linux/macOS (Bash)**:
+```bash
+# 本地访问，端口 8000（默认）
+adk web
+
+# 本地访问，自定义端口
+adk web --port 8080
+
+# 允许外部访问，自定义端口
+export BAYBE_DISABLE_TELEMETRY=1
+adk web --host 0.0.0.0 --port 8080
+```
+
+**使用 Python 模块方式**:
+```bash
+# 如果 adk 命令不可用，可以使用 Python 模块方式
+python -m google.adk web --port 8080
+python -m google.adk web --host 0.0.0.0 --port 8080
+```
+
+#### 参数说明
+- `--port <端口号>`: 指定服务器监听端口（默认: 8000）
+- `--host <地址>`: 指定绑定地址
+  - `127.0.0.1` 或 `localhost`: 仅本机访问（默认）
+  - `0.0.0.0`: 绑定所有网络接口，允许外部访问
 
 ### System Requirements
 - **Python**: 3.12.7 (当前测试环境)
@@ -188,6 +257,10 @@ google-adk==1.12.0
 5. **文档与依赖同步**
    - `requirements.txt` 与 README 版本列表保持一致
    - 新增 `baybe` 与 `google-adk` 依赖说明
+
+6. **获取函数偏好**
+   - 用户可选择 `qEI` / `qUCB` / `qNEI` / `qPI`
+   - 构建 Campaign 时将应用该偏好
 
 ### Verify Installation
 
