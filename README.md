@@ -144,6 +144,9 @@ adk web --host 0.0.0.0 --port 8080
 - **名称列**：列名包含 `name` 会被识别，可用于纠正无效 SMILES。
 - **缺失值**：参数列/目标列尽量不留空，否则可能被过滤或导致验证失败。
 
+## 📂 文档
+详细文档请参阅
+- `快速开始指南.md` - 快速入门教程
 ---
 
 <a id="bomas-project-description"></a>
@@ -240,13 +243,19 @@ adk web --host 0.0.0.0 --port 8080
 3.  **Run Experiments & Upload**: Download the provided template or use the unified `experiment_log.csv`. Fill in results and upload back to the chat interface.
 4.  **Analyze & Iterate**: The system automatically updates the model. You can request visualization or check convergence status at any time.
 
+### Initial Experimental Data CSV Specifications  
+- **File Format**: Only `.csv` is supported, with UTF-8 / UTF-8-SIG encoding recommended.  
+- **Column Name Requirements**: Must be in English only, without spaces/Chinese punctuation/explanatory text; unnamed columns like `Unnamed: 0` are prohibited.  
+- **Clean Headers**: Do not include ranges or descriptions in headers (e.g., `ratio[0,1]`, or terms like "maximize/minimize/per batch/constraint").  
+- **Target Column Naming**: Must start with `Target_` (e.g., `Target_yield`).  
+- **Numeric Columns**: Must contain pure numbers (no units, percentage signs, Chinese descriptions, or placeholders).  
+- **SMILES Column**: Columns with names containing `SMILE` (case-insensitive) will be treated as SMILES columns; must contain valid SMILES strings.  
+- **Name Column**: Columns with names containing `name` will be recognized and can be used to correct invalid SMILES.  
+- **Missing Values**: Parameter/target columns should avoid empty cells, as they may be filtered or cause validation failures. 
 
-
-## 📂 Documentation / 文档
-
-详细文档请参阅
-- `快速开始指南.md` - 快速入门教程
-
+## 📂 Documentation 
+For detailed documentation, please refer to
+- `Quick Start Guide.md` - Quick Start Tutorial
 
 ## 📄 License
 
