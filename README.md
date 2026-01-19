@@ -130,11 +130,11 @@ adk web --host 0.0.0.0 --port 8080
 
 1.  **启动会话**：启动 Web 界面并上传您的初始实验数据 (CSV)。**增强验证智能体**将验证您的数据并建议参数边界。
 2.  **获取推荐**：Agent 将构建 BayBE Campaign 并生成第一批实验条件。
-3.  **执行实验并上传**：下载提供的模板或使用统一的 `experiment_log.csv`。填写结果并上传回聊天界面。
+3.  **执行实验并上传**：下载提供的模板或使用session/xxx-xxxxxx/ `experiment_log.csv`。填写结果并上传回聊天界面。
 4.  **分析与迭代**：系统自动更新模型。您可以随时请求可视化或检查收敛状态。
 
 ### 初始实验数据 CSV 规范
-
+建议参照根目录下example.csv记录初始的实验
 - **文件格式**：仅支持 `.csv`，建议 UTF-8 / UTF-8-SIG 编码。
 - **列名要求**：全英文、无空格/中文标点/说明文字；禁止 `Unnamed: 0` 等无名列。
 - **表头清洁**：不要把范围或说明写进表头（如 `ratio[0,1]`、含“最大化/最小化/每批/约束”等）。
@@ -244,6 +244,7 @@ adk web --host 0.0.0.0 --port 8080
 4.  **Analyze & Iterate**: The system automatically updates the model. You can request visualization or check convergence status at any time.
 
 ### Initial Experimental Data CSV Specifications  
+It is recommended to refer to the example.csv file in the root directory to record the initial experiment.
 - **File Format**: Only `.csv` is supported, with UTF-8 / UTF-8-SIG encoding recommended.  
 - **Column Name Requirements**: Must be in English only, without spaces/Chinese punctuation/explanatory text; unnamed columns like `Unnamed: 0` are prohibited.  
 - **Clean Headers**: Do not include ranges or descriptions in headers (e.g., `ratio[0,1]`, or terms like "maximize/minimize/per batch/constraint").  
