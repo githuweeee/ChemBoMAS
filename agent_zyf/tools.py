@@ -79,7 +79,8 @@ def handle_file_upload(file_path: str, tool_context: ToolContext) -> str:
         state["session_dir"] = session_dir
         state["current_data_path"] = destination_path
         state["experiment_round"] = current_round
-        state["status"] = "Awaiting_Verification"
+        # Align with orchestrator state machine in prompts.py
+        state["status"] = "Data_Verification"
         
         return (f"Session `{session_id}` started. "
                 f"File received and saved to `{destination_path}`. "
@@ -101,7 +102,8 @@ def handle_file_upload(file_path: str, tool_context: ToolContext) -> str:
         # Update state for the new round
         state["current_data_path"] = destination_path
         state["experiment_round"] = current_round
-        state["status"] = "Awaiting_Verification" # Reset status to re-run the pipeline
+        # Reset status to re-run the pipeline (matches orchestrator prompt)
+        state["status"] = "Data_Verification"
 
         # Clean up old intermediate files for the new run
         state.pop("verified_data_path", None)

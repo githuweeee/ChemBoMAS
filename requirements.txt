@@ -8,3 +8,4 @@ seaborn==0.13.2
 setuptools==80.9.0
 baybe==0.13.2
 google-adk==1.12.0
+scikit-fingerprints==1.18.0
